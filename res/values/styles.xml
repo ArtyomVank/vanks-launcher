@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Vanks" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:windowShowWallpaper">false</item>
+        <item name="android:colorAccent">#FF7B8CFF</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+    <!-- свой экран блокировки: прозрачное окно — при входе под тающими обоями видно то, что было открыто -->
+    <style name="VanksLock" parent="Vanks">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+    <!-- приём ярлыков: окна не видно -->
+    <style name="VanksClear" parent="VanksLock">
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+</resources>

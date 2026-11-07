@@ -1,0 +1,43 @@
+// Стеклянная волна Delta (delta/shell/common/ui/shaders/glasswave.frag) для
+// RenderEffect: кольцо из center расходится и преломляет всё под ним.
+uniform shader src;
+uniform float2 res;
+uniform float2 center;
+uniform float radius;
+uniform float waveWidth;
+uniform float strength;
+uniform float rim;
+uniform float thump;
+
+half4 main(float2 px) {
+    // толчок: картинку у центра на миг втягивает внутрь
+    float2 v0 = px - center;
+    px = center + v0 * (1.0 - 0.045 * thump * exp(-length(v0) / (res.y * 0.55)));
+    float2 v = px - center;
+    float dist = length(v);
+    float2 dir = v / max(dist, 1.0);
+    float d = (dist - radius) / max(waveWidth, 1.0);
+    // гребень — выпуклая линза
+    float crest = exp(-d * d * 2.2);
+    float slope = -d * crest;
+    float a = d - 1.7;
+    float pre = 0.32 * exp(-a * a * 1.4) * -a;
+    float s2 = d + 2.4;
+    float second = -s2 * exp(-s2 * s2 * 2.0) * 0.42;
+    float k = strength * waveWidth * 0.9;
+    float2 off = dir * (slope + pre + second) * k * smoothstep(0.0, waveWidth * 0.9, dist);
+    float2 hi = res - float2(1.0);
+    half4 c = src.eval(clamp(px - off, float2(0.0), hi));
+    half4 cr = src.eval(clamp(px - off * 1.24, float2(0.0), hi));
+    half4 cb = src.eval(clamp(px - off * 0.76, float2(0.0), hi));
+    float3 col = float3(cr.r, c.g, cb.b);
+    float alpha = c.a;
+    // кромка ловит свет сверху слева, за гребнем — тень
+    float2 L = normalize(float2(-0.5, -0.85));
+    float lit = 0.55 + 0.45 * dot(dir, L);
+    col *= 1.0 + 0.1 * crest * strength;
+    col += float3(1.0) * (pow(crest, 4.0) * 0.35 + pow(crest, 14.0) * 0.5) * lit * rim * strength * alpha;
+    float b = d + 1.0;
+    col *= 1.0 - 0.2 * exp(-b * b * 3.0) * strength;
+    return half4(half3(min(col, float3(alpha))), half(alpha));
+}

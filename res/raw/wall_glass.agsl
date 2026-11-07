@@ -1,0 +1,111 @@
+// Сделано tools/agsl.py из delta/shell/wallpaper/super/glass.frag — правьте там.
+// Живые обои «Жидкое стекло»: на цветном размытом фоне стеклянные капли.
+// При входе они падают, сливаются друг с другом, как жидкость, и застывают
+// линзами: фон под ними преломляется по краю, кромка ловит свет. intro, zoom,
+// time — как у «Кругов». Цвета задаёт SuperWalls.qml. После правки:
+// tools/delta-shaders.sh.
+
+uniform vec2 res;
+uniform float intro;
+uniform float zoom;
+uniform float time;
+uniform float material;
+uniform vec4 colorA;
+uniform vec4 colorB;
+uniform vec4 colorC;
+uniform vec4 colorD;
+
+float noise(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+
+float back(float t) {
+    t = clamp(t, 0.0, 1.0);
+    float u = t - 1.0;
+    return 1.0 + 2.2 * u * u * u + 1.2 * u * u;
+}
+
+// фон: три мягких пятна цвета на глубине (как размытая фотография)
+vec3 backdrop(vec2 p, float t) {
+    float k = time * 0.04;
+    vec2 b1 = vec2(-0.9 + 0.08 * sin(k), 0.45), b2 = vec2(0.85, -0.35 + 0.08 * cos(k * 1.3)), b3 = vec2(0.15, 0.75);
+    vec3 col = colorA.rgb;
+    col = mix(col, colorB.rgb, exp(-dot(p - b1, p - b1) * 1.1) * 0.95);
+    col = mix(col, colorC.rgb, exp(-dot(p - b2, p - b2) * 1.0) * 0.90);
+    col = mix(col, colorD.rgb, exp(-dot(p - b3, p - b3) * 2.2) * 0.80);
+    // тонкие полосы — чтобы преломление было видно и на гладком фоне
+    col *= 1.0 + 0.035 * sin(p.x * 9.0 + p.y * 5.0);
+    return col * mix(0.15, 1.0, smoothstep(0.0, 0.4, t));
+}
+
+float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// затухающее покачивание после посадки: 0 в начале, потом в обе стороны
+float wobble(float f) { return exp(-5.5 * f) * sin(9.5 * f); }
+
+// капли: падают сверху с разгоном, садятся с пружиной, сплющиваясь о «дно»,
+// и сливаются; в конце — линзы
+float drops(vec2 p, float t, float ar) {
+    float d = 1e3;
+    for (int k = 0; k < 4; k++) {
+        float i = float(k);
+        float start = i * 0.11;
+        float s = back((t - start) / 0.5);
+        vec2 home = k == 0 ? vec2(-ar * 0.30, 0.05) : k == 1 ? vec2(ar * 0.30, -0.18) : k == 2 ? vec2(ar * 0.02, -0.52) : vec2(ar * 0.52, 0.48);
+        float r = k == 0 ? 0.44 : k == 1 ? 0.34 : k == 2 ? 0.20 : 0.16;
+        // первая треть — падение с разгоном, дальше — пружина у места
+        float f = clamp((t - start) / 0.62, 0.0, 1.0);
+        float fall = clamp(f / 0.3, 0.0, 1.0);
+        float g = max(f - 0.3, 0.0) / 0.7 * 1.6;
+        float y = f < 0.3 ? 1.0 - fall * fall : -0.25 * wobble(g);
+        vec2 c = home + vec2(0.0, 1.6 * y);
+        c += vec2(0.015 * sin(time * 0.3 + i * 2.0), 0.015 * cos(time * 0.25 + i));
+        // сплющивание при посадке и в падении — вытягивание
+        float w = f < 0.3 ? -0.12 * fall * fall : 0.22 * wobble(g) - 0.12 * exp(-8.0 * g);
+        vec2 q = (p - c) * vec2(1.0 - w * 0.6, 1.0 + w);
+        d = smin(d, length(q) - r * min(1.0, s), 0.22);
+    }
+    return d;
+}
+
+half4 main(vec2 fragCoord) {
+    vec2 qt_TexCoord0 = fragCoord / res;
+    float ar = res.x / res.y;
+    vec2 p = (qt_TexCoord0 * 2.0 - 1.0) * vec2(ar, -1.0);
+    p *= mix(1.0, 0.86, zoom);
+    float t = clamp(intro, 0.0, 1.0);
+    float px = 2.0 / res.y;
+
+    float d = drops(p, t, ar);
+    vec3 col = backdrop(p, t);
+    // тень капель на фоне
+    col *= 1.0 - 0.28 * exp(-max(d - 0.03, 0.0) * 7.0) * smoothstep(0.0, 0.3, t);
+
+    if (d < px) {
+        // нормаль по краю: разность расстояний вокруг точки
+        float e = 0.004;
+        vec2 g = vec2(drops(p + vec2(e, 0.0), t, ar) - drops(p - vec2(e, 0.0), t, ar),
+                      drops(p + vec2(0.0, e), t, ar) - drops(p - vec2(0.0, e), t, ar));
+        g = normalize(g + 1e-6);
+        // бортик 0.14: в середине линза плоская, к краю сильнее гнёт
+        float u = clamp(-d / 0.14, 0.0, 1.0);
+        float edge = (1.0 - u) * (1.0 - u);
+        vec2 off = -g * edge * 0.22 + p * 0.06;
+        // лёгкая радуга по краю: каналы гнутся по-разному
+        vec3 bent = vec3(backdrop(p + off * 1.06, t).r, backdrop(p + off, t).g, backdrop(p + off * 0.94, t).b);
+        vec3 glass = bent * 1.06 + 0.035;
+        // свет сверху слева: светлая кромка с одной стороны, тёмная с другой
+        vec2 L = normalize(vec2(-0.6, 0.8));
+        float rim = pow(1.0 - u, 5.0);
+        glass += vec3(1.0) * rim * (0.55 * max(dot(g, L), 0.0) + 0.12);
+        glass *= 1.0 - 0.22 * rim * max(dot(g, -L), 0.0);
+        // тонкая светлая линия по самому краю
+        glass += vec3(1.0) * 0.35 * exp(d * 260.0);
+        col = mix(col, glass, 1.0 - smoothstep(-px, px, d));
+    }
+
+    col *= 1.0 - 0.18 * smoothstep(0.8, 2.2, length(p));
+    col += (noise(qt_TexCoord0 * res) - 0.5) / 255.0 * 1.5;
+    return half4(vec4(col, 1.0));
+}

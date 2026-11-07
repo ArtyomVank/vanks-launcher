@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Окно приложения проявляется поверх карточки, которая уже выросла из значка. -->
+<alpha xmlns:android="http://schemas.android.com/apk/res/android"
+    android:fromAlpha="0" android:toAlpha="1"
+    android:duration="160"
+    android:interpolator="@android:interpolator/decelerate_quad" />

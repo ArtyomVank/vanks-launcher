@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Vanks</string>
+    <string name="settings_name">Настройки Vanks</string>
+    <string name="access_name">Vanks: жесты и вход</string>
+    <string name="access_desc">Жесты навигации Vanks: свайп вверх от нижнего края — «Домой», вверх с задержкой — «Недавние», от бокового края — «Назад». И вход: когда палец или пароль приняты на экране блокировки Vanks, служба сама набирает ваш PIN-код на системном экране блокировки. Служба не читает и не отправляет ничего другого.</string>
+    <string name="games_name">Игры Vanks</string>
+    <string name="notes_name">Vanks: динамический остров</string>
+</resources>

@@ -1,0 +1,135 @@
+// Сделано tools/agsl.py из delta/shell/wallpaper/super/earth.frag — правьте там.
+// Супер обои «Земля»: планета целиком считается здесь, без карты — материки и
+// облака из шума, океан с бликом солнца, атмосфера по краю и огни городов на
+// ночной стороне. Издалека — шар на звёздном небе (экран блокировки), вблизи —
+// дуга горизонта с рассветом (рабочий стол). Облака плывут, только пока
+// идёт время сцены. После правки: tools/delta-shaders.sh.
+
+uniform vec2 res;
+uniform float zoom;
+uniform float time;
+
+float hash(vec3 p) {
+    p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+
+float noise(vec3 p) {
+    vec3 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+               mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+
+float fbm(vec3 p, int oct) {
+    float a = 0.5, s = 0.0;
+    for (int i = 0; i < 7; i++) {
+        if (i >= oct) break;
+        s += a * noise(p);
+        p = p * 2.03 + vec3(1.7, 9.2, 3.1);
+        a *= 0.5;
+    }
+    return s;
+}
+
+vec3 stars(vec2 p) {
+    vec3 col = vec3(0.0);
+    for (int s = 0; s < 2; s++) {
+        float k = s == 0 ? 42.0 : 96.0;
+        vec2 c = floor(p * k);
+        float h = hash(vec3(c, float(s)));
+        if (h > 0.975) {
+            vec2 f = fract(p * k) - 0.5;
+            float b = (h - 0.975) / 0.025;
+            col += (1.0 - smoothstep(0.0, 0.30, length(f))) * b * b * vec3(0.9, 0.94, 1.0);
+        }
+    }
+    return col;
+}
+
+half4 main(vec2 fragCoord) {
+    vec2 qt_TexCoord0 = fragCoord / res;
+    float z = clamp(zoom, 0.0, 1.0);
+    vec2 p = (qt_TexCoord0 * 2.0 - 1.0) * vec2(res.x / res.y, -1.0);
+
+    // камера летит к Земле: радиус растёт, центр уходит вниз за экран
+    float R = 0.50 * exp(z * log(3.4 / 0.50));
+    vec2 c = vec2(mix(-0.05, 0.35, z), mix(0.0, -3.55, z));
+    vec2 q = (p - c) / R;
+    float d2 = dot(q, q);
+    float d = sqrt(d2);
+
+    vec3 col = stars(p * (1.0 + z * 0.35) + vec2(0.0, z * 0.5));
+    vec3 sun = normalize(vec3(0.75, 0.38, 0.55));
+
+    if (d2 < 1.0) {
+        vec3 n = vec3(q, sqrt(1.0 - d2));
+        // поворот: вблизи под нами другие места; планета медленно вращается
+        float yaw = mix(0.6, -0.2, z) + time * 0.004, pitch = mix(0.25, 1.0, z);
+        mat3 ry = mat3(cos(yaw), 0, -sin(yaw), 0, 1, 0, sin(yaw), 0, cos(yaw));
+        mat3 rx = mat3(1, 0, 0, 0, cos(pitch), sin(pitch), 0, -sin(pitch), cos(pitch));
+        vec3 s = ry * rx * n;
+
+        // материки: шум, сдвинутый другим шумом, чтобы береговая линия была рваной
+        int oct = z > 0.4 ? 7 : 6;
+        vec3 warp = vec3(fbm(s * 1.3 + 4.0, 4), fbm(s * 1.3 + 9.0, 4), fbm(s * 1.3 + 13.0, 4));
+        float h = fbm(s * 1.8 + warp * 1.3, oct) + 0.06 * (fbm(s * 9.0, 4) - 0.5);
+        float lat = abs(s.y);
+        float land = smoothstep(0.515, 0.535, h);
+        float shore = smoothstep(0.47, 0.515, h) * (1.0 - land);
+
+        // суша: зелень, к экватору и в глубине материков — пустыни, у полюсов лёд
+        float dry = smoothstep(0.55, 0.75, fbm(s * 3.0 + 20.0, 4) + (0.35 - abs(lat - 0.28)) * 0.8);
+        vec3 green = mix(vec3(0.10, 0.22, 0.08), vec3(0.20, 0.30, 0.12), fbm(s * 8.0, 4));
+        vec3 desert = mix(vec3(0.55, 0.42, 0.26), vec3(0.70, 0.56, 0.36), fbm(s * 9.0 + 3.0, 4));
+        vec3 ground = mix(green, desert, dry);
+        ground = mix(ground, vec3(0.30, 0.26, 0.22), smoothstep(0.62, 0.72, h) * 0.6);   // горы
+        float ice = smoothstep(0.74, 0.82, lat + (fbm(s * 5.0, 3) - 0.5) * 0.12);
+        ground = mix(ground, vec3(0.88, 0.92, 0.96), ice);
+        vec3 ocean = mix(vec3(0.01, 0.05, 0.16), vec3(0.03, 0.18, 0.32), shore + 0.25 * fbm(s * 6.0, 3));
+        ocean = mix(ocean, vec3(0.85, 0.90, 0.95), ice * 0.9);
+        vec3 albedo = mix(ocean, ground, land);
+
+        // облака плывут на запад, вихри вокруг пятен
+        vec3 cs = s + vec3(time * 0.003, 0.0, 0.0);
+        float cl = fbm(cs * 4.5 + vec3(fbm(cs * 2.0, 3)) * 1.8, oct);
+        float cloud = smoothstep(0.52, 0.80, cl) * 0.92;
+
+        vec3 N = n;
+        float dl = dot(N, sun);
+        float day = smoothstep(-0.10, 0.20, dl);
+        vec3 lit = albedo * max(dl, 0.0) * 1.35;
+        // блик солнца на воде
+        vec3 hv = normalize(sun + vec3(0.0, 0.0, 1.0));
+        lit += vec3(1.0, 0.92, 0.80) * pow(max(dot(N, hv), 0.0), 90.0) * (1.0 - land) * (1.0 - cloud) * 0.55;
+        lit = mix(lit, vec3(1.0) * max(dl, 0.0) * 1.15 + 0.02, cloud);
+        // огни городов: только на суше, без облаков, на ночной стороне
+        float city = smoothstep(0.60, 0.74, fbm(s * 55.0, 4)) * smoothstep(0.45, 0.6, fbm(s * 6.0 + 7.0, 3)) * land * (1.0 - ice) * (1.0 - dry * 0.6);
+        vec3 night = vec3(1.0, 0.70, 0.32) * city * 1.1 * (1.0 - cloud * 0.85) + albedo * 0.015;
+        vec3 surface = mix(night, lit, day);
+        // полоса заката вдоль терминатора
+        surface += vec3(0.9, 0.38, 0.12) * 0.07 * exp(-abs(dl - 0.04) * 9.0) * smoothstep(-0.2, 0.1, dl);
+        // атмосфера: к краю диска голубая дымка на дневной стороне
+        float rim = pow(1.0 - n.z, 2.5);
+        surface = mix(surface, vec3(0.35, 0.60, 1.0) * (0.04 + 0.9 * max(dl + 0.1, 0.0)), rim * 0.75);
+        float aa = 1.0 - smoothstep(1.0 - 2.5 / (R * res.y * 0.5), 1.0, d);
+        col = mix(col, surface, aa);
+    }
+    // свечение атмосферы над краем: ярче со стороны солнца, на рассвете тёплое
+    if (d > 0.97) {
+        vec2 dir = q / max(d, 1e-3);
+        float side = clamp(dot(dir, normalize(sun.xy)) * 0.7 + 0.45, 0.0, 1.0);
+        float k = (d - 1.0) * R * 18.0;
+        vec3 air = mix(vec3(0.95, 0.55, 0.25), vec3(0.35, 0.62, 1.0), smoothstep(0.0, 0.6, side));
+        col += air * side * exp(-max(k, 0.0)) * 0.55 * smoothstep(0.97, 1.0, d);
+    }
+    // вблизи — солнце встаёт из-за горизонта
+    if (z > 0.0) {
+        vec2 sp = c + normalize(vec2(0.55, 1.0)) * R * 1.0;
+        float g = exp(-length(p - sp) * 3.0) * z;
+        col += vec3(1.0, 0.85, 0.65) * g * 0.6;
+    }
+    col = pow(clamp(col, 0.0, 1.0), vec3(0.95));
+    return half4(vec4(col, 1.0));
+}

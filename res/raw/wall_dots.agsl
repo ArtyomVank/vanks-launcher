@@ -1,0 +1,62 @@
+// Сделано tools/agsl.py из delta/shell/wallpaper/super/dots.frag — правьте там.
+// Живые обои «Nothing»: поле точек, как матрица Glyph. При входе от одной
+// точки расходится волна — точки загораются, складываются в большой круг и
+// дугу и замирают. colorA — фон, colorB — точки, colorC — красная точка,
+// colorD — непогашенные точки. intro, zoom, time — как у «Кругов».
+// После правки: tools/delta-shaders.sh.
+
+uniform vec2 res;
+uniform float intro;
+uniform float zoom;
+uniform float time;
+uniform float material;
+uniform vec4 colorA;
+uniform vec4 colorB;
+uniform vec4 colorC;
+uniform vec4 colorD;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+
+half4 main(vec2 fragCoord) {
+    vec2 qt_TexCoord0 = fragCoord / res;
+    float ar = res.x / res.y;
+    vec2 p = (qt_TexCoord0 * 2.0 - 1.0) * vec2(ar, -1.0);
+    p *= mix(1.0, 0.9, zoom);
+    float t = clamp(intro, 0.0, 1.0);
+
+    // сетка: шаг 1/36 высоты, точка в середине клетки
+    float pitch = 2.0 / 36.0;
+    vec2 cell = floor(p / pitch) + 0.5;
+    vec2 cp = cell * pitch;
+    float dist = length(p - cp) / pitch;
+
+    // рисунок: большой круг справа, дуга слева снизу, короткая полоса сверху
+    vec2 c1 = vec2(ar * 0.30, 0.05);
+    float ring = abs(length(cp - c1) - 0.62);
+    float on = 1.0 - step(pitch * 0.55, ring);
+    float arc = abs(length(cp - vec2(-ar * 0.55, -1.05)) - 0.75);
+    on = max(on, (1.0 - step(pitch * 0.55, arc)) * step(-0.95, cp.y) * step(cp.x, -ar * 0.05));
+    on = max(on, step(abs(cp.y - 0.70), pitch * 0.5) * step(-ar * 0.62, cp.x) * step(cp.x, -ar * 0.20));
+
+    // волна загорания идёт от красной точки
+    vec2 origin = c1 + vec2(0.0, 0.62);
+    float wave = t * 4.2 - length(cp - origin);
+    float lit = smoothstep(0.0, 0.25, wave);
+    // точки мерцают, пока волна проходит, и гаснут до своего уровня
+    float flash = exp(-max(wave, 0.0) * 3.0) * step(0.0, wave);
+    float twinkle = 1.0 - 0.08 * (1.0 - cos(time * 0.8 + hash(cell) * 30.0)) * min(time, 1.0);
+
+    vec3 col = colorA.rgb;
+    float rr = on > 0.5 ? 0.36 : 0.22;
+    float dotMask = 1.0 - smoothstep(rr - 0.06, rr + 0.06, dist);
+    vec3 dotCol = on > 0.5 ? colorB.rgb * twinkle : colorD.rgb;
+    float level = on > 0.5 ? lit : lit * 0.9;
+    col = mix(col, dotCol, dotMask * level);
+    col += colorB.rgb * flash * dotMask * 0.5 * (1.0 - on);
+
+    // красная точка — с неё всё начинается
+    float red = 1.0 - smoothstep(0.30, 0.42, length(p - origin) / pitch * 0.5);
+    col = mix(col, colorC.rgb, red * smoothstep(0.0, 0.08, t));
+
+    return half4(vec4(col, 1.0));
+}

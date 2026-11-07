@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Игровой пульт: корпус, крестовина слева, четыре кнопки справа. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M38,40 L70,40 C80,40 86,47 87,58 L88,68 C89,75 83,79 78,75 L71,68 L37,68 L30,75 C25,79 19,75 20,68 L21,58 C22,47 28,40 38,40 Z" />
+    <path android:fillColor="#FF2A2F7A"
+        android:pathData="M35,49 L39,49 L39,53 L43,53 L43,57 L39,57 L39,61 L35,61 L35,57 L31,57 L31,53 L35,53 Z" />
+    <path android:fillColor="#FF2A2F7A"
+        android:pathData="M72,48.5 m-2.6,0 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 M72,61.5 m-2.6,0 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 M65.5,55 m-2.6,0 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 M78.5,55 m-2.6,0 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0" />
+</vector>

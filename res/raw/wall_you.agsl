@@ -1,0 +1,103 @@
+// Сделано tools/agsl.py из delta/shell/wallpaper/super/you.frag — правьте там.
+// Живые обои «Material You»: плоские тональные фигуры Material 3 — круги,
+// «печенье» с мягкими зубцами и капсула — выпрыгивают одна за другой на
+// спокойный фон и садятся на место с лёгким перелётом. Без градиентов и
+// бликов: цвет и мягкая тень. intro, zoom, time — как у «Кругов».
+// Цвета задаёт SuperWalls.qml. После правки: tools/delta-shaders.sh.
+
+uniform vec2 res;
+uniform float intro;
+uniform float zoom;
+uniform float time;
+uniform float material;
+uniform vec4 colorA;
+uniform vec4 colorB;
+uniform vec4 colorC;
+uniform vec4 colorD;
+
+// пружина: перелёт и затухание, как у анимаций Material 3
+float spring(float t) {
+    t = clamp(t, 0.0, 1.0);
+    return 1.0 - exp(-6.0 * t) * cos(9.0 * t);
+}
+
+float noise(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+
+float circle(vec2 p, vec2 c, float r) { return length(p - c) - r; }
+
+// «печенье»: круг с мягкими зубцами (форма Cookie из Material 3)
+float cookie(vec2 p, vec2 c, float r, float teeth, float turn) {
+    vec2 q = p - c;
+    float a = atan(q.y, q.x) + turn;
+    return length(q) - r * (1.0 + 0.075 * cos(a * teeth));
+}
+
+// капсула от a до b
+float pill(vec2 p, vec2 a, vec2 b, float r) {
+    vec2 pa = p - a, ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h) - r;
+}
+
+vec3 layer(vec3 col, float d, vec3 fill, float px) {
+    // мягкая тень вниз-вправо, как у приподнятой поверхности
+    col *= 1.0 - 0.18 * exp(-max(d - 0.01, 0.0) * 22.0);
+    return mix(col, fill, 1.0 - smoothstep(-px, px, d));
+}
+
+half4 main(vec2 fragCoord) {
+    vec2 qt_TexCoord0 = fragCoord / res;
+    vec2 p = (qt_TexCoord0 * 2.0 - 1.0) * vec2(res.x / res.y, -1.0);
+    p *= mix(1.0, 0.88, zoom);
+    float t = clamp(intro, 0.0, 1.0);
+    float px = 2.4 / res.y;
+    float ar = res.x / res.y;
+
+    // фон: тональная поверхность, чуть светлее к верху
+    vec3 col = mix(colorA.rgb * 0.92, colorA.rgb * 1.06, smoothstep(-1.0, 1.0, p.y));
+
+    // большой круг выходит из правого нижнего угла
+    float s1 = spring((t - 0.00) / 0.55);
+    vec2 c1 = vec2(ar * 0.62, -0.62);
+    float d1 = circle(p, c1, 1.05 * s1);
+    col = layer(col, d1, colorB.rgb, px);
+    // кольцо внутри него — светлее на тон
+    float s1b = spring((t - 0.18) / 0.5);
+    float ring = abs(circle(p, c1, 0.62 * s1b)) - 0.045 * s1b;
+    col = mix(col, mix(colorB.rgb, vec3(1.0), 0.18), 1.0 - smoothstep(-px, px, ring));
+
+    // «печенье» слева вверху медленно поворачивается
+    float s2 = spring((t - 0.22) / 0.55);
+    float turn = (1.0 - s2) * 1.4 + time * 0.05;
+    vec2 c2 = vec2(-ar * 0.50, 0.36);
+    float d2 = cookie(p, c2, 0.50 * s2, 9.0, turn);
+    col = layer(col, d2, colorC.rgb, px);
+
+    // капсула наискось через середину
+    float s3 = spring((t - 0.40) / 0.5);
+    vec2 a3 = vec2(-0.10, -0.42), b3 = a3 + vec2(0.62, 0.30) * s3;
+    float d3 = pill(p, a3, b3, 0.13 * min(1.0, s3 * 1.4));
+    col = layer(col, d3, colorD.rgb, px);
+
+    // мелкие круги: точка и полый круг
+    float s4 = spring((t - 0.55) / 0.45);
+    float d4 = circle(p, vec2(ar * 0.10, 0.52), 0.11 * s4);
+    col = layer(col, d4, colorD.rgb, px);
+    float s5 = spring((t - 0.66) / 0.4);
+    float d5 = abs(circle(p, vec2(-ar * 0.18, -0.62), 0.16 * s5)) - 0.03 * s5;
+    col = mix(col, colorC.rgb, 1.0 - smoothstep(-px, px, d5));
+
+    // ряд точек сеткой — узнаваемая мелочь Material You
+    float s6 = smoothstep(0.70, 1.0, t);
+    vec2 g = (p - vec2(ar * 0.34, 0.50)) / 0.07;
+    vec2 cell = floor(g + 0.5);
+    if (abs(cell.x) <= 2.0 && abs(cell.y) <= 1.0) {
+        float dd = length(g - cell) * 0.07 - 0.012 * s6;
+        col = mix(col, colorB.rgb, 1.0 - smoothstep(-px, px, dd));
+    }
+
+    // в начале фон тёмный, тон проступает вместе с фигурами
+    col *= mix(0.25, 1.0, smoothstep(0.0, 0.35, t));
+    col += (noise(qt_TexCoord0 * res) - 0.5) / 255.0 * 1.5;
+    return half4(vec4(col, 1.0));
+}

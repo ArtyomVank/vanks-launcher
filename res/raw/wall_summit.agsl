@@ -1,0 +1,149 @@
+// Только у телефона (в Delta таких нет) — правьте здесь.
+// Живые обои «Вершина вблизи»: та же гранитная вершина, что в «Вершине», но
+// в вертикальном кадре, как фото на телефоне: пик посередине, над ним небо,
+// внизу снежный хребет. Кадр запечён tools/peak_bake.cpp шире экрана (слева
+// запас, чтобы камере было куда повернуть):
+//     peak_bake 1428 2434 summit.ppm summit-m.ppm -0.3 2.6 -4.0 0.25 4.3 7.5 1.5 0.66 0.56 1.04 1.04
+// маска (вдвое меньше): R — небо, G — высота точки, B — даль (t / 25).
+//   Камера — как на видео: на экране блокировки смотрит на вершину, а при
+//   входе поворачивает влево и подъезжает ближе, к концу замедляясь. Поворот —
+//   точный (через плоскость кадра), наезд — по маске дали: ближнее растёт
+//   быстрее дальнего, ближние скалы закрывают дальние, небо стоит. На столе,
+//   если обои живые, камера чуть дышит. Свет спускается с вершины, за пиком
+//   плывут розовые облака, у подножия тянется туман.
+
+uniform vec2 res;
+uniform float intro;
+uniform float zoom;
+uniform float time;
+uniform shader photo;
+uniform vec2 photoSize;
+uniform shader mask;
+uniform vec2 maskSize;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm3(vec2 p) {
+    return 0.55 * vnoise(p) + 0.3 * vnoise(p * 2.07 + 3.1) + 0.15 * vnoise(p * 4.13 + 7.7);
+}
+// exp(−x²): pow от отрицательного на части видеокарт даёт NaN
+float bell(float x) {
+    return exp(-x * x);
+}
+// плоскость запечённого кадра: фокус, края; HALF — полуширина кадра 1080×2340
+const float F = 1.5;
+const float XL = 0.66;
+const float XR = 0.56;
+const float YH = 1.04;
+const float HALF = 0.4615;
+// поворот камеры влево (рад): от взгляда на вершину до конца входа
+const float YAW0 = -0.03;
+const float YAW1 = 0.055;
+const float LOCK = 0.3;   // поза экрана блокировки (WallView.LOCK_POSE)
+
+vec2 tex(vec2 p) {
+    return vec2((p.x + XL) / (XL + XR), (YH - p.y) / (2.0 * YH));
+}
+float ease(float t) {
+    t = clamp(t, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+// даль точки плоскости кадра (единицы сцены); небо и горизонт — «бесконечность»
+float depth(vec2 p) {
+    float far = mask.eval(clamp(tex(p), 0.0, 1.0) * maskSize).b;
+    return far > 0.985 ? 10000.0 : max(far * 25.0, 3.0);
+}
+
+half4 main(vec2 fragCoord) {
+    vec2 q = fragCoord / res;
+    float e = ease(intro);
+    // путь камеры: до позы блокировки стоит (пока спускается свет), потом
+    // поворот влево и наезд — быстро в начале, мягко в конце, как на видео
+    float k = clamp((intro - LOCK) / (1.0 - LOCK), 0.0, 1.0);
+    float cam = 1.0 - (1.0 - k) * (1.0 - k) * (1.0 - k);
+    float yaw = mix(YAW0, YAW1, cam);
+    // подъезд: немного сдвигом (объём) и больше — «длинным фокусом»: так
+    // вершина растёт, как на видео, а у ближних скал не тянутся края
+    float push = 0.6 * cam + 0.1 * zoom + 0.06 * sin(time * 0.11) * step(0.99, intro);
+    // экран → плоскость кадра 1080×2340 «обложкой» на любой экран
+    float ar = res.x / res.y;
+    vec2 o = q - 0.5;
+    if (ar > HALF) o.y *= HALF / ar; else o.x *= ar / HALF;
+    vec2 sc = vec2(o.x * 2.0 * HALF, -o.y * 2.0) / (1.0 + 0.16 * cam + 0.03 * zoom);
+    // поворот: луч повёрнутой камеры — в плоскость запечённого кадра
+    float cy = cos(yaw), sy = sin(yaw);
+    vec3 d = vec3(sc.x * cy - F * sy, sc.y, sc.x * sy + F * cy);
+    vec2 p0 = d.xy * (F / d.z);
+    // наезд по направлению взгляда: точка на дали t уходит от «точки схода»
+    // в t / (t − push) раз. Обратно: идём от неё к этой точке экрана и берём
+    // первое (ближайшее) место кадра, которое сюда приехало
+    vec2 foe = vec2(-F * sy / cy, 0.0);
+    vec2 r = p0 - foe;
+    float smin = (3.0 - push) / 3.0, ps = smin, sh = 1.0;
+    for (int i = 0; i <= 12; i++) {
+        float s = mix(smin, 1.0, float(i) / 12.0);
+        float t = depth(foe + r * s);
+        float dd = (t - push) / t - s;
+        if (dd <= 0.0) {
+            // уточнить делением пополам: без «эха» гребней на переднем плане
+            float lo = i == 0 ? s : ps, hi = s;
+            for (int j = 0; j < 5; j++) {
+                float mid = 0.5 * (lo + hi);
+                float tm = depth(foe + r * mid);
+                if ((tm - push) / tm - mid <= 0.0) hi = mid; else lo = mid;
+            }
+            sh = hi;
+            break;
+        }
+        ps = s;
+    }
+    vec2 pp = foe + r * sh;
+    vec2 tuv = clamp(tex(pp), 0.0, 1.0);
+    // для облаков и неба — координаты исходного кадра (как раньше)
+    vec2 uv = vec2((pp.x + HALF) / (2.0 * HALF), (1.0 - pp.y) * 0.5);
+
+    vec3 c = photo.eval(tuv * photoSize).rgb;
+    vec3 m = mask.eval(tuv * maskSize).rgb;
+    float sky = m.r, h = m.g, far = m.b;
+
+    // до входа — предрассветная синева; свет спускается с вершины
+    float lum = dot(c, vec3(0.299, 0.587, 0.114));
+    vec3 cold = vec3(0.17, 0.25, 0.46) * lum * 1.45 + vec3(0.008, 0.014, 0.04);
+    vec3 coldSky = c * vec3(0.42, 0.52, 0.86) * 0.7;
+    float front = mix(1.06, 0.0, e);
+    float lit = smoothstep(front - 0.05, front + 0.015, h);
+    vec3 col = mix(cold, c, lit);
+    col += c * vec3(0.35, 0.12, 0.0) * bell((h - front) / 0.035) * (1.0 - 0.6 * e);
+    // небо: сверху синее, к горизонту теплеет, как на закате
+    vec3 warmSky = c + vec3(0.16, 0.05, 0.02) * smoothstep(0.15, 0.6, uv.y);
+    col = mix(col, mix(coldSky, warmSky, e), sky);
+
+    // розовые облака за пиком: полоса справа на середине и лёгкие выше
+    float band = bell((uv.y - 0.44) / 0.06) * smoothstep(0.35, 0.75, uv.x)
+               + 0.8 * bell((uv.y - 0.56) / 0.045)
+               + 0.5 * bell((uv.y - 0.2) / 0.05);
+    float behind = max(sky, smoothstep(0.6, 0.95, far) * 0.5);
+    if (band * behind > 0.01) {
+        vec2 p = vec2(uv.x * 2.4 + time * 0.03, uv.y * 15.0);
+        float n = fbm3(p) * 0.7 + fbm3(p * 1.9 + vec2(time * 0.018, 4.0)) * 0.3;
+        float a = clamp((n * band - 0.38) * 3.0, 0.0, 0.9) * behind;
+        vec3 warm = vec3(1.0, 0.66, 0.70) * (0.8 + 0.32 * n);
+        vec3 dim = vec3(0.30, 0.34, 0.50) * (0.8 + 0.3 * n);
+        col = mix(col, mix(dim, warm, e), a);
+    }
+    // туман у подножия, ближе к зрителю — плывёт
+    float valley = (1.0 - smoothstep(0.08, 0.3, h)) * (1.0 - sky) * smoothstep(0.1, 0.3, far) * (1.0 - smoothstep(0.8, 0.97, far));
+    if (valley > 0.01) {
+        vec2 p = vec2(uv.x * 3.0 - time * 0.025, uv.y * 9.0);
+        float n = fbm3(p);
+        float a = clamp((n - 0.33) * 1.8, 0.0, 0.72) * valley;
+        col = mix(col, mix(vec3(0.34, 0.38, 0.55), vec3(0.96, 0.80, 0.86), e), a);
+    }
+
+    col += (hash(q * res + fract(time)) - 0.5) / 255.0 * 1.5;
+    return half4(vec4(col, 1.0));
+}
