@@ -2674,7 +2674,7 @@ public final class SettingsActivity extends Activity {
             Prefs.liveClose = on;
             save();
         }));
-        add(vg, toggleRow(INDIGO, Glyph::grid, "Свои «Недавние»", "Вверх и задержать: карточки приложений со снимками окна", Prefs.ownRecents, on -> {
+        add(vg, toggleRow(INDIGO, Glyph::grid, "Свои «Недавние»", "Вверх и задержать — и в приложении, и на главном экране: карточки со снимками окна", Prefs.ownRecents, on -> {
             Prefs.ownRecents = on;
             save();
         }));
@@ -2682,6 +2682,20 @@ public final class SettingsActivity extends Activity {
             Prefs.navPill = on;
             save();
             VanksAccess.sync();
+        }));
+
+        // «Недавние»: вверх и задержать — откуда угодно, и со стола
+        String[] rv = {"row", "grid", "stack"};
+        Group rg = group(col, "Вид «Недавних»", "Лента — карточки в ряд. Сетка — два столбца, листается вверх-вниз, карточку смахнуть вбок. Стопка — карточки наезжают друг на друга, как на iPhone.");
+        add(rg, segments(new String[]{"Лента", "Сетка", "Стопка"}, Math.max(0, Arrays.asList(rv).indexOf(Prefs.recentsView)), i -> {
+            Prefs.recentsView = rv[i];
+            save();
+        }));
+        String[] ph = {"lens", "google", "assist", "off"};
+        Group pg = group(col, "Зажать полоску внизу", "Поиск по экрану — снимок экрана уходит в Google Lens: обведите или выберите, что найти. Google — строка поиска Google. Ассистент — Google Ассистент или Gemini.");
+        add(pg, segments(new String[]{"По экрану", "Google", "Ассистент", "Нет"}, Math.max(0, Arrays.asList(ph).indexOf(Prefs.pillHold)), i -> {
+            Prefs.pillHold = ph[i];
+            save();
         }));
 
         // свайпы
@@ -2906,26 +2920,14 @@ public final class SettingsActivity extends Activity {
 
     /**
      * Карточка оболочки, как в «Об устройстве» ColorOS: крупное название,
-     * версия и состояние. Нажатие — искать новую версию; нашлась — второе
-     * нажатие качает и ставит (подробности — «Обновление»).
+     * версия и состояние на обложке версии. Нажатие — «Обновление».
      */
     private View versionCard() {
         FrameLayout card = new FrameLayout(this);
         String cur = Updater.current(this);
+        // та же обложка, что и у страницы «Обновление»
         card.addView(Views.drawn(this, (c, w, h) -> {
-            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            float r = Ui.dpf(26);
-            p.setShader(new android.graphics.LinearGradient(0, 0, w, h,
-                    new int[]{Ui.accentLight(), Ui.accentDark(), 0xFF0B0B12}, new float[]{0f, 0.55f, 1f},
-                    android.graphics.Shader.TileMode.CLAMP));
-            c.drawRoundRect(0, 0, w, h, r, r, p);
-            // мягкие круги света, как на обложке версии
-            p.setShader(new android.graphics.RadialGradient(w * 0.82f, h * 0.18f, w * 0.55f, 0x55FFFFFF, 0x00FFFFFF,
-                    android.graphics.Shader.TileMode.CLAMP));
-            c.drawRoundRect(0, 0, w, h, r, r, p);
-            p.setShader(new android.graphics.RadialGradient(w * 0.1f, h * 1.05f, w * 0.6f, 0x33000000, 0x00000000,
-                    android.graphics.Shader.TileMode.CLAMP));
-            c.drawRoundRect(0, 0, w, h, r, r, p);
+            if (w > 0 && h > 0) c.drawBitmap(UpdateArt.get(Math.round(w), Math.round(h), cur, "", false), 0, 0, null);
         }), new FrameLayout.LayoutParams(-1, -1));
         LinearLayout tx = new LinearLayout(this);
         tx.setOrientation(LinearLayout.VERTICAL);
@@ -2937,12 +2939,8 @@ public final class SettingsActivity extends Activity {
         TextView state = Views.label(this, "", 14, Ui.regular, 0xCCFFFFFF);
         tx.addView(state);
         card.addView(tx, new FrameLayout.LayoutParams(-1, -1));
-        boolean[] busy = new boolean[1];
-        Runnable show = () -> {
-            Updater.Release r = Updater.known;
-            state.setText(r != null ? "Доступна " + r.version + " — нажмите, чтобы установить" : "Нажмите, чтобы проверить обновления");
-        };
-        show.run();
+        Updater.Release known = Updater.known;
+        state.setText(known != null ? "Доступна " + known.version + " — нажмите, чтобы установить" : "Нажмите, чтобы проверить обновления");
         card.setClipToOutline(true);
         card.setOutlineProvider(new android.view.ViewOutlineProvider() {
             @Override
@@ -2951,78 +2949,213 @@ public final class SettingsActivity extends Activity {
             }
         });
         card.setForeground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), null, new ColorDrawable(0xFFFFFFFF)));
-        card.setOnClickListener(v -> {
-            if (busy[0]) return;
-            Updater.Release r = Updater.known;
-            busy[0] = true;
-            if (r == null) {
-                state.setText("Ищу новую версию…");
-                Updater.check(this, (rr, err) -> {
-                    busy[0] = false;
-                    if (err != null) state.setText(err);
-                    else if (rr == null) state.setText("Установлена последняя версия");
-                    else show.run();
-                });
-                return;
-            }
-            state.setText("Скачиваю " + r.version + "…");
-            Updater.install(this, r, f -> state.setText("Скачиваю " + r.version + " — " + Math.round(f * 100) + " %"), (rr, err) -> {
-                busy[0] = false;
-                state.setText(err != null ? err : "Ставлю " + r.version + "…");
-            });
-        });
+        // как в ColorOS: карточка открывает «Обновление», а там сразу ищется новая версия
+        card.setOnClickListener(v -> push(updatePage(), true));
         return card;
     }
 
     // ── обновление по воздуху ─────────────────────────────────────────────
 
+    /** Как телефон называется для людей («Redmi Note 12»), а не код модели. */
+    private String deviceName() {
+        String n = null;
+        try {
+            n = Settings.Global.getString(getContentResolver(), Settings.Global.DEVICE_NAME);
+        } catch (RuntimeException ignored) {
+        }
+        if (n == null || n.trim().isEmpty()) {
+            n = Build.MODEL.toLowerCase(Locale.ROOT).startsWith(Build.MANUFACTURER.toLowerCase(Locale.ROOT)) ? Build.MODEL
+                    : Build.MANUFACTURER + " " + Build.MODEL;
+            if (!n.isEmpty()) n = Character.toUpperCase(n.charAt(0)) + n.substring(1);
+        }
+        return n.trim();
+    }
+
+    /**
+     * «Обновление»: обложка на весь экран — крупный номер версии, «Vanks OS»
+     * и телефон, сверху «назад» и меню, снизу кнопка «Поиск обновлений».
+     * Нашлась новая версия — та же кнопка качает и ставит её.
+     */
     private View updatePage() {
-        View[] out = new View[1];
-        LinearLayout col = page("Обновление", "Настройки", out);
-        col.addView(versionCard(), heroLp());
-        String cur = Updater.current(this);
-        Group g = group(col, null, "Новые версии выходят на GitHub (" + Updater.REPO + "). Vanks скачивает APK, сверяет контрольную сумму "
-                + "и ставит его через установщик Android; Android проверяет, что он подписан тем же ключом. "
-                + "«Игры Vanks» — часть того же приложения и обновляются вместе с лаунчером.");
-        add(g, row(0, null, "Установлена", null, cur, null));
-        LinearLayout[] check = new LinearLayout[1], inst = new LinearLayout[1];
-        TextView notes = Views.label(this, "", 14, Ui.regular, SUB);
-        notes.setPadding(Ui.dp(36), Ui.dp(4), Ui.dp(28), 0);
+        String cur = Updater.current(this), model = deviceName();
+        FrameLayout pg = new FrameLayout(this);
+        pg.setClickable(true);
+        pg.setBackgroundColor(0xFF05050C);
+        pg.addView(Views.drawn(this, (c, w, h) -> {
+            if (w > 0 && h > 0) c.drawBitmap(UpdateArt.get(Math.round(w), Math.round(h), cur, model, true), 0, 0, null);
+        }), new FrameLayout.LayoutParams(-1, -1));
+        FrameLayout in = new FrameLayout(this);
+        pg.addView(in, new FrameLayout.LayoutParams(-1, -1));
+        // обложка — и под строкой состояния: страница выходит за отступы стопки
+        stack.setClipToPadding(false);
+        pg.post(() -> {
+            if (!(pg.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) pg.getLayoutParams();
+            lp.topMargin = -stack.getPaddingTop();
+            lp.bottomMargin = -stack.getPaddingBottom();
+            pg.setLayoutParams(lp);
+            in.setPadding(0, stack.getPaddingTop(), 0, stack.getPaddingBottom());
+        });
+
+        // сверху: «назад», заголовок, меню
+        LinearLayout bar = new LinearLayout(this);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(Ui.dp(12), Ui.dp(6), Ui.dp(12), 0);
+        View back = Views.drawn(this, (c, w, h) -> Glyph.chevronLeft(c, w / 2f - Ui.dpf(1), h / 2f, Ui.dpf(22), 0xFFFFFFFF));
+        back.setBackground(Views.round(0x33FFFFFF, 22));
+        back.setOnClickListener(v -> back());
+        bar.addView(back, new LinearLayout.LayoutParams(Ui.dp(44), Ui.dp(44)));
+        TextView title = Views.label(this, "Обновление ПО", 18, Ui.medium, 0xFFFFFFFF);
+        title.setPadding(Ui.dp(14), 0, Ui.dp(8), 0);
+        title.setSingleLine(true);
+        bar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        View more = Views.drawn(this, (c, w, h) -> {
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setColor(0xFFFFFFFF);
+            for (int i = -1; i <= 1; i++) c.drawCircle(w / 2f, h / 2f + i * Ui.dpf(6), Ui.dpf(2.2f), p);
+        });
+        more.setBackground(Views.round(0x33FFFFFF, 22));
+        bar.addView(more, new LinearLayout.LayoutParams(Ui.dp(44), Ui.dp(44)));
+        in.addView(bar, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
+
+        // снизу: что нового / состояние и кнопка
+        LinearLayout bottom = new LinearLayout(this);
+        bottom.setOrientation(LinearLayout.VERTICAL);
+        bottom.setPadding(Ui.dp(16), 0, Ui.dp(16), Ui.dp(18));
+        TextView notes = Views.label(this, "", 14, Ui.regular, 0xE6FFFFFF);
+        notes.setBackground(Views.round(0x40000000, 22));
+        notes.setPadding(Ui.dp(18), Ui.dp(14), Ui.dp(18), Ui.dp(14));
+        notes.setMaxLines(9);
+        notes.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams nl = new LinearLayout.LayoutParams(-1, -2);
+        nl.bottomMargin = Ui.dp(12);
+        bottom.addView(notes, nl);
+        TextView state = Views.label(this, "", 13, Ui.regular, 0xB3FFFFFF);
+        state.setGravity(Gravity.CENTER);
+        state.setPadding(0, 0, 0, Ui.dp(10));
+        bottom.addView(state);
+        float[] prog = {-1};
+        FrameLayout btn = new FrameLayout(this);
+        btn.setBackground(new android.graphics.drawable.Drawable() {
+            final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            final RectF r = new RectF();
+
+            @Override
+            public void draw(Canvas c) {
+                r.set(getBounds());
+                float rad = r.height() / 2;
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(0x47000000);
+                c.drawRoundRect(r, rad, rad, p);
+                p.setColor(0x24FFFFFF);
+                c.drawRoundRect(r, rad, rad, p);
+                if (prog[0] >= 0) {
+                    // скачивание: кнопка заполняется акцентом
+                    c.save();
+                    c.clipRect(r.left, r.top, r.left + r.width() * prog[0], r.bottom);
+                    p.setColor(Ui.alpha(Ui.accentLight(), 0.55f));
+                    c.drawRoundRect(r, rad, rad, p);
+                    c.restore();
+                }
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(Ui.dpf(1));
+                p.setColor(0x2EFFFFFF);
+                r.inset(Ui.dpf(0.5f), Ui.dpf(0.5f));
+                c.drawRoundRect(r, rad, rad, p);
+            }
+
+            @Override public void setAlpha(int a) {}
+            @Override public void setColorFilter(android.graphics.ColorFilter f) {}
+            @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
+        });
+        btn.setForeground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), null, Views.round(0xFFFFFFFF, 28)));
+        TextView label = Views.label(this, "Поиск обновлений", 16, Ui.medium, 0xFFFFFFFF);
+        label.setPadding(Ui.dp(22), 0, Ui.dp(56), 0);
+        label.setSingleLine(true);
+        btn.addView(label, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL));
+        // крутилка справа, пока ищем и качаем
+        View spin = Views.drawn(this, (c, w, h) -> {
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(Ui.dpf(2.2f));
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setColor(0xFFFFFFFF);
+            float m = Ui.dpf(3);
+            c.drawArc(m, m, w - m, h - m, 0, 100, false, p);
+        });
+        spin.setVisibility(View.INVISIBLE);
+        android.animation.ObjectAnimator turn = android.animation.ObjectAnimator.ofFloat(spin, View.ROTATION, 0, 360);
+        turn.setDuration(800);
+        turn.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        turn.setInterpolator(new android.view.animation.LinearInterpolator());
+        FrameLayout.LayoutParams sl = new FrameLayout.LayoutParams(Ui.dp(22), Ui.dp(22), Gravity.CENTER_VERTICAL | Gravity.END);
+        sl.rightMargin = Ui.dp(22);
+        btn.addView(spin, sl);
+        bottom.addView(btn, new LinearLayout.LayoutParams(-1, Ui.dp(58)));
+        in.addView(bottom, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+
+        boolean[] busy = new boolean[1];
+        java.util.function.Consumer<Boolean> spinning = on -> {
+            spin.setVisibility(on ? View.VISIBLE : View.INVISIBLE);
+            if (on) turn.start();
+            else turn.cancel();
+        };
         Runnable show = () -> {
             Updater.Release r = Updater.known;
-            inst[0].setVisibility(r != null ? View.VISIBLE : View.GONE);
-            if (r != null) setValue(inst[0], r.version);
-            notes.setText(r != null && !r.notes.isEmpty() ? "Что нового в " + r.version + ":\n" + r.notes : "");
+            label.setText(r != null ? "Скачать и установить " + r.version : "Поиск обновлений");
+            notes.setText(r != null && !r.notes.isEmpty() ? "Что нового в " + r.version + "\n\n" + r.notes : "");
             notes.setVisibility(notes.getText().length() > 0 ? View.VISIBLE : View.GONE);
+            if (state.getText().length() == 0) state.setText("Установлена версия " + cur);
         };
-        check[0] = row(BLUE, Glyph::rotate, "Проверить обновления", null, "", () -> {
-            setValue(check[0], "Проверяю…");
-            Updater.check(this, (r, err) -> {
-                setValue(check[0], err != null ? "Ошибка" : r != null ? "Есть " + r.version : "Последняя");
-                if (err != null) toast(err);
+        show.run();
+        // открыли — сразу искать, как в ColorOS (если новая версия ещё не найдена)
+        if (Updater.known == null) pg.postDelayed(() -> {
+            if (pg.isAttachedToWindow()) btn.performClick();
+        }, 450);
+        btn.setOnClickListener(v -> {
+            if (busy[0]) return;
+            Updater.Release r = Updater.known;
+            busy[0] = true;
+            spinning.accept(true);
+            if (r == null) {
+                state.setText("Ищу новую версию…");
+                Updater.check(this, (rr, err) -> {
+                    busy[0] = false;
+                    spinning.accept(false);
+                    state.setText(err != null ? err : rr == null ? "Установлена последняя версия · " + cur : "Доступна версия " + rr.version);
+                    show.run();
+                });
+                return;
+            }
+            state.setText("Скачиваю " + r.version + "…");
+            prog[0] = 0;
+            Updater.install(this, r, f -> {
+                prog[0] = f;
+                label.setText("Скачиваю " + r.version + " — " + Math.round(f * 100) + " %");
+                btn.getBackground().invalidateSelf();
+            }, (rr, err) -> {
+                busy[0] = false;
+                spinning.accept(false);
+                prog[0] = -1;
+                btn.getBackground().invalidateSelf();
+                state.setText(err != null ? err : "Ставлю " + r.version + "…");
                 show.run();
             });
         });
-        add(g, check[0]);
-        inst[0] = row(GREEN, Glyph::plus, "Скачать и установить", null, "", () -> {
-            Updater.Release r = Updater.known;
-            if (r == null) return;
-            setValue(inst[0], "0 %");
-            Updater.install(this, r, f -> setValue(inst[0], Math.round(f * 100) + " %"), (rr, err) -> {
-                setValue(inst[0], err != null ? r.version : "Ставлю…");
-                if (err != null) toast(err);
-            });
+        more.setOnClickListener(v -> {
+            int[] l = new int[2];
+            v.getLocationOnScreen(l);
+            RectF at = new RectF(l[0], l[1], l[0] + v.getWidth(), l[1] + v.getHeight());
+            new DropMenu(this, null, at.centerX(), at.centerY(), at)
+                    .add(Prefs.autoUpdate ? "Автообновление: включено" : "Автообновление: выключено", Glyph::bell, () -> {
+                        Prefs.autoUpdate = !Prefs.autoUpdate;
+                        save();
+                        toast(Prefs.autoUpdate ? "Vanks будет проверять обновления раз в 12 часов" : "Проверка только по кнопке");
+                    })
+                    .add("Все версии на GitHub", Glyph::info, () -> open(new Intent(Intent.ACTION_VIEW, Uri.parse(Updater.page()))))
+                    .add("О лаунчере", Glyph::phone, () -> push(aboutPage(), true))
+                    .show(stack);
         });
-        add(g, inst[0]);
-        col.addView(notes);
-        show.run();
-
-        Group a = group(col, null, "Раз в 12 часов, когда открыт стол. Если вышла новая версия — придёт уведомление.");
-        add(a, toggleRow(TEAL, Glyph::bell, "Проверять самому", null, Prefs.autoUpdate, on -> {
-            Prefs.autoUpdate = on;
-            save();
-        }));
-        add(a, row(GREY, Glyph::info, "Репозиторий на GitHub", null, null, () -> open(new Intent(Intent.ACTION_VIEW, Uri.parse(Updater.page())))));
-        return out[0];
+        return pg;
     }
 }

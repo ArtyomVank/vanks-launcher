@@ -46,6 +46,8 @@ final class Prefs {
     static boolean liveClose = true;   // закрытие жестом: окно за пальцем и в свой значок
     static boolean lockSystemBio = true;
     static boolean ownRecents = true;   // свои «Недавние» (карточки со снимками) вместо системных
+    static String recentsView = "row";  // вид «Недавних»: row — лента, grid — сетка в два столбца, stack — стопка
+    static String pillHold = "lens";    // зажать полоску внизу: lens — поиск по экрану, google — поиск Google, assist — ассистент, off
     static boolean autoUpdate = true;   // проверять обновления на GitHub   // лицо и палец читает Android, под картинкой экрана Vanks
     static boolean island = true, islandVolume = true, islandRides = true, islandMedia = true;   // динамический остров и что в нём
     static boolean keepGestures = true; // жесты Android вместо кнопок (HyperOS ставит кнопки чужим лаунчерам)    // пункт управления справа сверху, уведомления — слева
@@ -123,6 +125,8 @@ final class Prefs {
         liveClose = sp.getBoolean("liveClose", true);
         lockSystemBio = sp.getBoolean("lockSystemBio", true);
         ownRecents = sp.getBoolean("ownRecents", true);
+        recentsView = sp.getString("recentsView", "row");
+        pillHold = sp.getString("pillHold", "lens");
         autoUpdate = sp.getBoolean("autoUpdate", true);
         island = sp.getBoolean("island", true);
         islandVolume = sp.getBoolean("islandVolume", true);
@@ -229,6 +233,8 @@ final class Prefs {
                 .putBoolean("liveClose", liveClose)
                 .putBoolean("lockSystemBio", lockSystemBio)
                 .putBoolean("ownRecents", ownRecents)
+                .putString("recentsView", recentsView)
+                .putString("pillHold", pillHold)
                 .putBoolean("autoUpdate", autoUpdate)
                 .putBoolean("island", island)
                 .putBoolean("islandVolume", islandVolume)

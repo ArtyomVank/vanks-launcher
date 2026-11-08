@@ -24,10 +24,12 @@ import android.widget.FrameLayout;
 import java.util.ArrayList;
 
 /**
- * Свой экран «Недавние»: карточки приложений со снимком окна в ряд, свежее —
- * посередине, старые — левее. Листается пальцем на пружине, карточку вверх —
- * закрыть приложение, касание — открыть (карточка вырастает в окно), кнопка
- * внизу — закрыть все. Касание мимо карточек — на главный экран.
+ * Свой экран «Недавние»: карточки приложений со снимком окна. Три вида
+ * (Prefs.recentsView): лента — в ряд, свежее посередине, старые левее;
+ * стопка — как на iPhone, старые наезжают слева под свежую; сетка — два
+ * столбца сверху вниз. Листается пальцем на пружине, карточку вверх (в сетке
+ * — вбок) — закрыть приложение, касание — открыть (карточка вырастает в
+ * окно), кнопка внизу — закрыть все. Касание мимо карточек — на главный экран.
  * Открывается жестом «вверх и задержать» (служба жестов): окно приложения
  * само уменьшается в первую карточку.
  */
@@ -55,11 +57,20 @@ public final class RecentsActivity extends Activity {
         if (a != null && a.deck != null) a.deck.invalidate();
     }
 
-    /** Где первая карточка на экране W×H. */
+    /** Где первая карточка на экране W×H (в сетке — левая верхняя). */
     static RectF firstCard(float W, float H) {
+        if ("grid".equals(Prefs.recentsView)) {
+            float m = gridGap(), cw = (W - 3 * m) / 2, ch = cw * H / W, top = gridTop();
+            return new RectF(m, top, m + cw, top + ch);
+        }
         float cw = W * 0.68f, ch = cw * H / W, cy = H * 0.47f;
         return new RectF(W / 2 - cw / 2, cy - ch / 2, W / 2 + cw / 2, cy + ch / 2);
     }
+
+    // сетка: поля, верх первой карточки (под строкой состояния и подписью), подпись
+    private static float gridGap() { return Ui.dpf(14); }
+    private static float gridTop() { return Ui.dpf(76); }
+    private static float gridLabel() { return Ui.dpf(34); }
 
     @Override
     protected void onCreate(Bundle b) {
@@ -150,6 +161,8 @@ public final class RecentsActivity extends Activity {
         private VelocityTracker vt;
         private float downX, downY, scroll0;
         private int mode, hit = -1, launching = -1;   // mode: 0 — не решили, 1 — листаем, 2 — закрываем карточку
+        // вид: лента, сетка, стопка (берётся при открытии)
+        private boolean grid, stack;
         private long last;
         private boolean launched;
 
@@ -158,6 +171,8 @@ public final class RecentsActivity extends Activity {
         }
 
         void load() {
+            grid = "grid".equals(Prefs.recentsView);
+            stack = "stack".equals(Prefs.recentsView);
             items.clear();
             PackageManager pm = getPackageManager();
             int ip = Ui.dp(52);
@@ -197,16 +212,45 @@ public final class RecentsActivity extends Activity {
         }
 
         private float maxScroll() {
+            if (grid) {
+                float ch = firstCard(getWidth(), getHeight()).height(), rows = (items.size() + 1) / 2;
+                // последний ряд — над кнопкой «Закрыть все»
+                return Math.max(0, gridTop() + rows * (ch + gridLabel() + gridGap()) + Ui.dpf(130) - getHeight());
+            }
             return Math.max(0, (items.size() - 1) * gap());
         }
 
-        /** Рамка карточки i (без сдвига вверх). */
+        /** Насколько карточка i в стопке позади той, что в фокусе: 0 — в фокусе, >0 — старее. */
+        private float depthOf(int i) {
+            return (i * gap() - scroll.v - items.get(i).shift.v) / gap();
+        }
+
+        /** Рамка карточки i (без сдвига на закрытие). */
         private void card(int i, RectF out) {
             RectF f = firstCard(getWidth(), getHeight());
             Item it = items.get(i);
-            float cx = getWidth() / 2f - i * gap() + scroll.v + it.shift.v;
-            float d = Math.min(1f, Math.abs(cx - getWidth() / 2f) / gap());
-            float s = (1 - 0.06f * d) * (i == 0 && cameByFly ? 1 : 0.9f + 0.1f * enter.v);
+            float in = i == 0 && cameByFly ? 1 : 0.9f + 0.1f * enter.v;
+            if (grid) {
+                // два столбца, свежее — слева сверху; листается вверх-вниз
+                float m = gridGap();
+                float x = m + (i % 2) * (f.width() + m);
+                float y = f.top + (i / 2) * (f.height() + gridLabel() + m) - scroll.v + it.shift.v;
+                float hw = f.width() / 2 * in, hh = f.height() / 2 * in;
+                out.set(x + f.width() / 2 - hw, y + f.height() / 2 - hh, x + f.width() / 2 + hw, y + f.height() / 2 + hh);
+                return;
+            }
+            float cx, s;
+            if (stack) {
+                // как на iPhone: свежие уезжают вправо целиком, старые прячутся
+                // левее под свежую и чуть уменьшаются
+                float d = depthOf(i);
+                cx = getWidth() / 2f - (d > 0 ? d * gap() * 0.34f : d * gap());
+                s = (1 - 0.045f * Math.max(0, Math.min(d, 3))) * in;
+            } else {
+                cx = getWidth() / 2f - i * gap() + scroll.v + it.shift.v;
+                float d = Math.min(1f, Math.abs(cx - getWidth() / 2f) / gap());
+                s = (1 - 0.06f * d) * in;
+            }
             float hw = f.width() / 2 * s, hh = f.height() / 2 * s;
             out.set(cx - hw, f.centerY() - hh, cx + hw, f.centerY() + hh);
         }
@@ -237,17 +281,21 @@ public final class RecentsActivity extends Activity {
                 case MotionEvent.ACTION_MOVE: {
                     float dx = x - downX, dy = y - downY, slop = Ui.dpf(8);
                     if (mode == 0) {
-                        if (Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy)) mode = 1;
+                        if (grid) {
+                            // сетка: вверх-вниз — листать, вбок по карточке — закрыть
+                            if (Math.abs(dy) > slop && Math.abs(dy) > Math.abs(dx)) mode = 1;
+                            else if (Math.abs(dx) > slop && hit >= 0) mode = 2;
+                        } else if (Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy)) mode = 1;
                         else if (dy < -slop && hit >= 0 && Math.abs(dy) > Math.abs(dx)) mode = 2;
                     }
                     if (mode == 1) {
-                        float s = scroll0 + dx, m = maxScroll();
+                        float s = scroll0 + (grid ? -dy : dx), m = maxScroll();
                         // за краем — с сопротивлением
                         if (s < 0) s *= 0.35f;
                         else if (s > m) s = m + (s - m) * 0.35f;
                         scroll.snap(s);
                     } else if (mode == 2) {
-                        items.get(hit).dy.snap(Math.min(dy, 0));
+                        items.get(hit).dy.snap(grid ? dx : Math.min(dy, 0));
                     }
                     invalidate();
                     return true;
@@ -259,12 +307,20 @@ public final class RecentsActivity extends Activity {
                     vt.recycle();
                     vt = null;
                     boolean up = e.getActionMasked() == MotionEvent.ACTION_UP;
-                    if (mode == 1) {
+                    if (mode == 1 && grid) {
+                        // сетка листается свободно, с разгоном
+                        scroll.vel = -vy;
+                        scroll.to(Math.max(0, Math.min(maxScroll(), scroll.v - vy * 0.3f)), 120, 1f);
+                    } else if (mode == 1) {
                         float g = gap();
                         int to = Math.round((scroll.v + vx * 0.22f) / g);
                         to = Math.max(0, Math.min(items.size() - 1, to));
                         scroll.vel = vx;
                         scroll.to(to * g, 190, 0.9f);
+                    } else if (mode == 2 && grid) {
+                        Item it = items.get(hit);
+                        if (Math.abs(it.dy.v) > getWidth() * 0.28f || Math.abs(vx) > Ui.dpf(900)) dismiss(hit, it.dy.v + vx * 0.1f);
+                        else it.dy.to(0, 260, 0.8f);
                     } else if (mode == 2) {
                         Item it = items.get(hit);
                         if (it.dy.v < -getHeight() * 0.16f || vy < -Ui.dpf(900)) dismiss(hit, vy);
@@ -282,21 +338,30 @@ public final class RecentsActivity extends Activity {
             return true;
         }
 
-        private void dismiss(int i, float vy) {
+        /** v — скорость (в сетке — куда смахнули: знак — сторона). */
+        private void dismiss(int i, float v) {
             Item it = items.get(i);
             it.gone = true;
-            it.dy.vel = Math.min(vy, -Ui.dpf(1800));
-            it.dy.to(-getHeight() * 1.1f, 120, 1f);
+            if (grid) {
+                float side = v < 0 ? -1 : 1;
+                it.dy.vel = side * Ui.dpf(1800);
+                it.dy.to(side * getWidth() * 1.1f, 120, 1f);
+            } else {
+                it.dy.vel = Math.min(v, -Ui.dpf(1800));
+                it.dy.to(-getHeight() * 1.1f, 120, 1f);
+            }
             Feel.sound(RecentsActivity.this, "swoosh");
             Feel.buzz(this, Feel.TICK);
             postDelayed(() -> {
                 int at = items.indexOf(it);
                 if (at < 0) return;
                 items.remove(at);
-                // старые (левее) встают на место ушедшей — плавно
-                float g = gap();
+                // старые (левее, в сетке — ниже) встают на место ушедшей — плавно
+                float g = grid ? 0 : gap();
                 for (int k = at; k < items.size(); k++) {
-                    items.get(k).shift.snap(-g);
+                    // в сетке карточка уходит в соседний столбец: подтягиваем по высоте ряда
+                    if (grid) g = k % 2 == 1 ? firstCard(getWidth(), getHeight()).height() + gridLabel() + gridGap() : 0;
+                    items.get(k).shift.snap(grid ? g : -g);
                     items.get(k).shift.to(0, 200, 0.86f);
                 }
                 if (scroll.t > maxScroll()) scroll.to(maxScroll(), 190, 0.9f);
@@ -314,8 +379,10 @@ public final class RecentsActivity extends Activity {
                 it.gone = true;
                 int k = i;
                 postDelayed(() -> {
-                    it.dy.vel = -Ui.dpf(2200);
-                    it.dy.to(-getHeight() * 1.1f, 120, 1f);
+                    // в сетке столбцы разлетаются в свои стороны
+                    float side = k % 2 == 0 ? -1 : 1;
+                    it.dy.vel = grid ? side * Ui.dpf(2200) : -Ui.dpf(2200);
+                    it.dy.to(grid ? side * getWidth() * 1.1f : -getHeight() * 1.1f, 120, 1f);
                     invalidate();
                 }, (long) (Math.min(k, 6) * 40 * Prefs.k()));
             }
@@ -337,7 +404,7 @@ public final class RecentsActivity extends Activity {
             card(i, r);
             float g = gap();
             // сначала карточка встаёт в центр (если открыли соседнюю), потом растёт в окно
-            scroll.to(i * g, 260, 1f);
+            if (!grid) scroll.to(i * g, 260, 1f);
             grow.to(1, 230, 0.92f);
             Feel.sound(RecentsActivity.this, "app-open");
             Feel.buzz(this, Feel.CLICK);
@@ -411,7 +478,8 @@ public final class RecentsActivity extends Activity {
                 c.drawText(VanksAccess.running() ? "Они появятся, когда вы откроете приложения"
                         : "Включите службу «Vanks: жесты и вход»", W / 2f, H * 0.47f + Ui.dpf(26), tp);
             }
-            // от старых к свежим: открываемая — поверх всех
+            // от старых к свежим: открываемая — поверх всех; в стопке свежая
+            // лежит на старых, поэтому порядок тот же
             for (int i = items.size() - 1; i >= 0; i--) if (i != launching) drawItem(c, i, W, H);
             if (launching >= 0) drawItem(c, launching, W, H);
             // «Закрыть все»
@@ -430,8 +498,12 @@ public final class RecentsActivity extends Activity {
             Item it = items.get(i);
             if (i == 0 && waitFly) return;   // её место пока держит летящее окно
             card(i, r);
-            r.offset(0, it.dy.v);
-            float a = Ui.clamp(1 - (-it.dy.v) / (H * 0.55f)) * (i == 0 && cameByFly ? 1 : enter.v);
+            if (grid) r.offset(it.dy.v, 0);
+            else r.offset(0, it.dy.v);
+            float a = Ui.clamp(1 - Math.abs(it.dy.v) / ((grid ? W : H) * 0.55f)) * (i == 0 && cameByFly ? 1 : enter.v);
+            if (r.bottom < -Ui.dpf(40) || r.top > H + Ui.dpf(40)) return;
+            // в стопке подпись — у карточки в фокусе и соседних, дальние без неё
+            float lab = stack ? Ui.clamp(1.4f - Math.abs(depthOf(i)) * 1.2f) : 1;
             if (r.right < -Ui.dpf(20) || r.left > W + Ui.dpf(20) || a <= 0.01f) return;
             float g = i == launching ? grow.v : 0;
             if (g > 0) {
@@ -444,12 +516,12 @@ public final class RecentsActivity extends Activity {
             if (g < 0.2f) {
                 float hy = r.top - Ui.dpf(14), is = Ui.dpf(26);
                 ir.set(r.left + Ui.dpf(4), hy - is, r.left + Ui.dpf(4) + is, hy);
-                p.setAlpha(Math.round(al * (1 - g * 5)));
+                p.setAlpha(Math.round(al * (1 - g * 5) * (stack ? Ui.clamp(lab + 0.6f) : 1)));
                 c.drawBitmap(it.icon, null, ir, p);
                 tp.setTypeface(Ui.medium);
                 tp.setTextSize(Ui.dpf(14));
                 tp.setTextAlign(Paint.Align.LEFT);
-                tp.setColor(Ui.alpha(0xFFFFFFFF, a * (1 - g * 5)));
+                tp.setColor(Ui.alpha(0xFFFFFFFF, a * (1 - g * 5) * lab));
                 String l = it.label;
                 float maxW = r.width() - is - Ui.dpf(14);
                 if (tp.measureText(l) > maxW) {
@@ -474,6 +546,14 @@ public final class RecentsActivity extends Activity {
                 ir.set(r.centerX() - s / 2, r.centerY() - s / 2, r.centerX() + s / 2, r.centerY() + s / 2);
                 p.setAlpha(al);
                 c.drawBitmap(it.icon, null, ir, p);
+            }
+            if (stack && g == 0) {
+                // старые в стопке — в тени под свежей
+                float sh = Ui.clamp(depthOf(i)) * 0.35f;
+                if (sh > 0.01f) {
+                    p.setColor(Ui.alpha(0xFF000000, sh * a));
+                    c.drawRect(r, p);
+                }
             }
             c.restore();
         }

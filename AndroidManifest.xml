@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="os.vanks.launcher"
-    android:versionCode="22"
-    android:versionName="0.22">
+    android:versionCode="23"
+    android:versionName="0.23">
 
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="36" />
 
@@ -51,6 +51,9 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="market" />
         </intent>
+        <!-- зажатие полоски внизу: поиск Google и Google Lens -->
+        <package android:name="com.google.android.googlequicksearchbox" />
+        <package android:name="com.google.ar.lens" />
     </queries>
 
     <application
@@ -185,5 +188,11 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+        <!-- снимок экрана для поиска по нему (Google Lens): только по выданному разрешению -->
+        <provider
+            android:name=".ShotProvider"
+            android:authorities="os.vanks.launcher.shot"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

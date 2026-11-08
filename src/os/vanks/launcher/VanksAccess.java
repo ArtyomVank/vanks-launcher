@@ -321,6 +321,78 @@ public final class VanksAccess extends AccessibilityService {
         }
     }
 
+    // ── зажатие полоски внизу: поиск ───────────────────────────────────────
+
+    private static final String GOOGLE = "com.google.android.googlequicksearchbox";
+
+    /** Зажали полоску: поиск по экрану (Google Lens), поиск Google или ассистент. */
+    private void pillSearch() {
+        if ("assist".equals(Prefs.pillHold)) {
+            if (!go(new android.content.Intent(android.content.Intent.ACTION_ASSIST))
+                    && !go(new android.content.Intent(android.content.Intent.ACTION_VOICE_COMMAND))) googleSearch();
+            return;
+        }
+        if (!"lens".equals(Prefs.pillHold) || android.os.Build.VERSION.SDK_INT < 30) {
+            googleSearch();
+            return;
+        }
+        // как «Обвести и найти»: снимок экрана — в Google Lens (полоска на снимке не мешает)
+        try {
+            takeScreenshot(android.view.Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
+                @Override
+                public void onSuccess(ScreenshotResult r) {
+                    android.hardware.HardwareBuffer hb = r.getHardwareBuffer();
+                    Bitmap hw = Bitmap.wrapHardwareBuffer(hb, r.getColorSpace());
+                    hb.close();
+                    android.net.Uri u = null;
+                    if (hw != null) {
+                        u = ShotProvider.save(VanksAccess.this, hw);
+                        hw.recycle();
+                    }
+                    if (u == null || !lens(u)) googleSearch();
+                }
+
+                @Override
+                public void onFailure(int code) {
+                    // окно защищено от снимков или снимали слишком часто — просто поиск
+                    googleSearch();
+                }
+            });
+        } catch (RuntimeException e) {
+            googleSearch();
+        }
+    }
+
+    private boolean lens(android.net.Uri u) {
+        for (String pkg : new String[]{GOOGLE, "com.google.ar.lens"}) {
+            android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType("image/png").setPackage(pkg)
+                    .putExtra(android.content.Intent.EXTRA_STREAM, u)
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            i.setClipData(android.content.ClipData.newRawUri("", u));
+            if (go(i)) return true;
+        }
+        return false;
+    }
+
+    /** Строка поиска Google; нет приложения Google — google.com в браузере. */
+    private void googleSearch() {
+        if (go(new android.content.Intent("android.search.action.GLOBAL_SEARCH").setPackage(GOOGLE))) return;
+        if (go(new android.content.Intent(android.content.Intent.ACTION_WEB_SEARCH).setPackage(GOOGLE))) return;
+        android.content.Intent app = getPackageManager().getLaunchIntentForPackage(GOOGLE);
+        if (app != null && go(app)) return;
+        go(new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.google.com/")));
+    }
+
+    private boolean go(android.content.Intent i) {
+        try {
+            startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     private Bitmap appIcon(String pkg) {
         try {
             android.graphics.drawable.Drawable d = getPackageManager().getApplicationIcon(pkg);
@@ -349,12 +421,36 @@ public final class VanksAccess extends AccessibilityService {
         private boolean held;
         private float holdY;
         private final Runnable holdCheck = this::holdNow;
+        // жест уже сделал своё (открыл «Недавние», поиск) — отпускание ничего не делает
+        private boolean done;
+        private final Runnable pressCheck = this::pressNow;
 
         private void holdNow() {
-            if (active && kind == BOTTOM && !held && pull > Ui.dpf(110)) {
+            // на столе окну некуда лететь — хватает и пальца пониже
+            boolean onHome = fly == null && Home.onTop();
+            if (active && kind == BOTTOM && !held && !done && pull > Ui.dpf(onHome ? 72 : 110)) {
                 held = true;
                 Feel.buzz(this, Feel.TICK);
+                // окна за пальцем нет (стол, защищённое окно) — открыть «Недавние»
+                // сразу, не дожидаясь отпускания: HyperOS часто обрывает жест у края
+                // (CANCEL), и с главного экрана они открывались через раз
+                if (fly == null && Prefs.ownRecents) {
+                    done = true;
+                    Feel.buzz(this, Feel.CLICK);
+                    RecentsActivity.open(VanksAccess.this, false);
+                    dropShot();
+                }
             }
+        }
+
+        /** Полоску зажали и не двигали: поиск Google (или что выбрано). */
+        private void pressNow() {
+            if (!active || done || kind != BOTTOM || pull > Ui.dpf(8) || "off".equals(Prefs.pillHold)) return;
+            done = true;
+            Feel.buzz(this, Feel.PRESS);
+            Home.gesturePull(-1);
+            dropShot();
+            pillSearch();
         }
 
         /** Палец сдвинулся: заново ждать задержки; ушёл далеко — «Недавние» отменить. */
@@ -422,8 +518,13 @@ public final class VanksAccess extends AccessibilityService {
                     pull = 0;
                     active = true;
                     held = false;
+                    done = false;
                     holdY = e.getRawY();
                     removeCallbacks(holdCheck);
+                    removeCallbacks(pressCheck);
+                    // зажатие — только у самой полоски, а не по всему низу экрана
+                    if (kind == BOTTOM && Math.abs(e.getRawX() - getWidth() / 2f) < Ui.dpf(110))
+                        postDelayed(pressCheck, 480);
                     if (kind == BOTTOM) {
                         y0 = e.getRawY();
                         vx = vy = 0;
@@ -445,6 +546,8 @@ public final class VanksAccess extends AccessibilityService {
                     }
                     boolean was = pull > Ui.dpf(56);
                     pull = Math.max(0, d);
+                    if (done) return true;
+                    if (kind == BOTTOM && (pull > Ui.dpf(8) || Math.abs(e.getRawX() - x0) > Ui.dpf(14))) removeCallbacks(pressCheck);
                     if (kind == BOTTOM) trackHold(e.getRawY());
                     if (kind == BOTTOM) {
                         long t = SystemClock.uptimeMillis();
@@ -459,6 +562,8 @@ public final class VanksAccess extends AccessibilityService {
                         // окно приложения пошло за пальцем — под ним уже стол
                         if (fly == null && shot != null && pull > Ui.dpf(28)) startFly(x0, y0);
                         if (fly != null) fly.follow(e.getRawX(), e.getRawY());
+                        // на столе окна нет — стол сам уходит вглубь за пальцем
+                        else Home.gesturePull(Ui.clamp(pull / Ui.dpf(280)));
                     }
                     if (kind != BOTTOM && !was && pull > Ui.dpf(56)) Feel.buzz(this, Feel.TICK);
                     invalidate();
@@ -472,7 +577,12 @@ public final class VanksAccess extends AccessibilityService {
                     // лаунчером ничего не делают) — нам приходит CANCEL посреди движения.
                     // Палец уже шёл вверх или внутрь — значит, жест был: выполняем сами.
                     if (!up && pull > Ui.dpf(kind == BOTTOM ? 10 : 14) && now - downAt < 1500) up = true;
-                    if (kind == BOTTOM && fly != null) {
+                    removeCallbacks(pressCheck);
+                    if (kind == BOTTOM && fly == null) Home.gesturePull(-1);
+                    if (done) {
+                        // уже открыли «Недавние» или поиск
+                        dropShot();
+                    } else if (kind == BOTTOM && fly != null) {
                         boolean held = this.held && pull > Ui.dpf(90);
                         // CANCEL — систему потянуло на свой жест: значит, домой
                         boolean cancel = e.getActionMasked() == MotionEvent.ACTION_CANCEL;
@@ -491,6 +601,7 @@ public final class VanksAccess extends AccessibilityService {
                     }
                     active = false;
                     held = false;
+                    done = false;
                     removeCallbacks(holdCheck);
                     pull = 0;
                     grow(this, false);

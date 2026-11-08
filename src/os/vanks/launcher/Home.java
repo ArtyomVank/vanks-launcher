@@ -316,6 +316,11 @@ public final class Home extends Activity {
     protected void onResume() {
         super.onResume();
         resumedNow = true;
+        // ушли в «Недавние» жестом со стола — вернуться не вглубь
+        if (pulled) {
+            pulled = false;
+            setDepth(0, 200, 0.86f);
+        }
         // в «Настройках Vanks» что-то поменяли — применить
         if (Prefs.rev != seenRev) {
             seenRev = Prefs.rev;
@@ -861,6 +866,20 @@ public final class Home extends Activity {
     static String lastPkg;
     static RectF lastRect;
     static android.graphics.Bitmap lastIcon;
+
+    /**
+     * Жест снизу на столе (служба жестов): стол уходит вглубь за пальцем,
+     * k — 0…1; меньше нуля — отпустили, вернуть на место.
+     */
+    static void gesturePull(float k) {
+        Home h = shown;
+        if (h == null || !h.resumedNow || h.locked) return;
+        h.pulled = k > 0;
+        if (k < 0) h.setDepth(0, 200, 0.86f);
+        else h.setDepth(0.75f * k, 900, 1f);
+    }
+
+    private boolean pulled;
 
     /** Стол на экране и сверху. */
     static boolean onTop() {
