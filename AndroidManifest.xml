@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="os.vanks.launcher"
-    android:versionCode="24"
-    android:versionName="0.24">
+    android:versionCode="25"
+    android:versionName="0.25">
 
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="36" />
 
@@ -38,6 +38,8 @@
          телефоне Android их просто не выдаёт. -->
     <!-- камера Vanks -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- звук в роликах камеры Vanks -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-permission android:name="android.permission.ACCESS_CONTEXTUAL_SEARCH" />
     <uses-permission android:name="android.permission.INSTALL_PACKAGES" />
@@ -159,6 +161,14 @@
             </intent-filter>
             <intent-filter>
                 <action android:name="android.media.action.IMAGE_CAPTURE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.action.VIDEO_CAMERA" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.action.VIDEO_CAPTURE" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
