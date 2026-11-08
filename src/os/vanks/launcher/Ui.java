@@ -123,12 +123,109 @@ final class Ui {
         return !Prefs.lockWallpaper.isEmpty() && !Prefs.lockWallpaper.equals(Prefs.wallpaper);
     }
 
-    /** Маленькая картинка обоев для выбора в «Настройках». */
-    static Bitmap wallThumb(Context c, Walls.W w) {
-        BitmapFactory.Options o = new BitmapFactory.Options();
-        o.inScaled = false;
-        o.inSampleSize = 4;
-        return BitmapFactory.decodeResource(c.getResources(), w.still, o);
+    // ── картинки обоев для выбора: читаются в фоне ───────────────────────
+
+    private static final java.util.concurrent.ExecutorService picLoader = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "vanks-walls");
+        t.setPriority(Thread.NORM_PRIORITY - 2);
+        return t;
+    });
+    private static final android.util.LruCache<String, Bitmap> pics = new android.util.LruCache<String, Bitmap>(28 << 20) {
+        @Override
+        protected int sizeOf(String k, Bitmap b) {
+            return b.getAllocationByteCount();
+        }
+    };
+    private static final java.util.HashSet<String> picsLoading = new java.util.HashSet<>();
+    private static final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    /**
+     * Картинка обоев для выбора (sample — во сколько раз меньше, alpha — с
+     * прозрачностью, как передний план «Вершины»). Готова — вернёт сразу; нет —
+     * null, а картинка читается в фоне и потом перерисует view. Раньше каждую
+     * читали прямо при листании — выбор обоев дёргался.
+     */
+    static Bitmap wallPic(Context c, int res, int sample, boolean alpha, android.view.View into) {
+        String key = res + "/" + sample;
+        Bitmap b = pics.get(key);
+        if (b != null || res == 0) return b;
+        if (picsLoading.add(key)) {
+            Context app = c.getApplicationContext();
+            picLoader.execute(() -> {
+                BitmapFactory.Options o = new BitmapFactory.Options();
+                o.inScaled = false;
+                o.inSampleSize = sample;
+                // без прозрачности — 2 байта на точку: вдвое меньше памяти
+                if (!alpha) o.inPreferredConfig = Bitmap.Config.RGB_565;
+                Bitmap r;
+                try {
+                    r = BitmapFactory.decodeResource(app.getResources(), res, o);
+                } catch (OutOfMemoryError e) {
+                    r = null;
+                }
+                Bitmap done = r;
+                main.post(() -> {
+                    picsLoading.remove(key);
+                    if (done != null) pics.put(key, done);
+                    if (into != null) into.invalidate();
+                });
+            });
+        }
+        return null;
+    }
+
+    /** Маленькая картинка обоев (сетка, боковые карточки); null — ещё читается. */
+    static Bitmap wallThumb(Context c, Walls.W w, android.view.View into) {
+        return wallPic(c, w.still, 4, false, into);
+    }
+
+    /** Крупная картинка обоев; пока читается — маленькая (или null). */
+    static Bitmap wallBig(Context c, Walls.W w, android.view.View into) {
+        Bitmap b = wallPic(c, w.still, 2, false, into);
+        return b != null ? b : wallThumb(c, w, into);
+    }
+
+    /** Выбор обоев закрыт — картинки больше не нужны. */
+    static void dropPics() {
+        pics.evictAll();
+    }
+
+    /** Карточка-заглушка, пока картинка читается. */
+    static void picHolder(Canvas c, RectF r, float radius) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(0xFF1C1C22);
+        c.drawRoundRect(r, radius, radius, p);
+    }
+
+    /** Картинка со скруглёнными углами «по cover» — без clipPath (он дорог видеочипу). */
+    static void drawCover(Canvas c, Bitmap b, RectF r, float radius, Paint p, float zoom) {
+        BitmapShader s = new BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+        float k = Math.max(r.width() / b.getWidth(), r.height() / b.getHeight()) * zoom;
+        Matrix m = new Matrix();
+        m.setScale(k, k);
+        m.postTranslate(r.centerX() - b.getWidth() * k / 2, r.centerY() - b.getHeight() * k / 2);
+        s.setLocalMatrix(m);
+        p.setShader(s);
+        c.drawRoundRect(r, radius, radius, p);
+        p.setShader(null);
+    }
+
+    // ── слабый телефон ────────────────────────────────────────────────────
+
+    private static int weak = -1;
+
+    /**
+     * Слабый телефон (до 4,5 ГБ памяти — Galaxy A04 и подобные): обои в
+     * движении считаются в меньшем разрешении, тяжёлые эффекты по умолчанию выключены.
+     */
+    static boolean weak(Context c) {
+        if (weak < 0) {
+            android.app.ActivityManager am = c.getSystemService(android.app.ActivityManager.class);
+            android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+            am.getMemoryInfo(mi);
+            weak = am.isLowRamDevice() || mi.totalMem < (4500L << 20) ? 1 : 0;
+        }
+        return weak == 1;
     }
 
     static int accent() { return Prefs.accent | 0xFF000000; }

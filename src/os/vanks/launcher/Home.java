@@ -270,6 +270,16 @@ public final class Home extends Activity {
      * часам блокировки; null — стола не видно или часов на этом столе нет
      * (тогда часы блокировки уходят вверх, как на ПК).
      */
+    /**
+     * Под экраном блокировки виден стол с теми же обоями: тогда при входе
+     * анимируются только его обои, а свои экран блокировки просто прячет —
+     * иначе видеочип считает два одинаковых шейдера сразу.
+     */
+    static boolean wallUnder(Walls.W w) {
+        Home h = shown;
+        return h != null && !h.locked && h.wall != null && w != null && h.wall.spec() == w;
+    }
+
     static RectF lockLanding() {
         Home h = shown;
         if (h == null || h.locked) return null;
@@ -349,6 +359,7 @@ public final class Home extends Activity {
         readState();
         desk.invalidateAll();
         wall.setPaused(false);
+        lockWall.setPaused(false);
         Updater.maybeCheck(this);
         // жесты Vanks включены, а служба нет — включить её самим, если есть право
         // (Vanks OS даёт его системному лаунчеру, иначе — adb pm grant); без
@@ -397,6 +408,7 @@ public final class Home extends Activity {
         resumedNow = false;
         ui.removeCallbacksAndMessages(null);
         wall.setPaused(true);
+        lockWall.setPaused(true);
         // тихое чтение пальца в фоне не работает — при возврате начать заново
         if (authing && FingerSensor.silent(this)) {
             FingerSensor.cancel();

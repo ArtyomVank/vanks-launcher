@@ -225,6 +225,48 @@ final class LockFace {
         c.drawBitmap(b, cx - b.getWidth() / 2f, cy - b.getHeight() / 2f, bp);
     }
 
+    private static final class Pre { String key; android.graphics.Bitmap b; long at; }
+    private static final java.util.HashMap<String, Pre> pres = new java.util.HashMap<>();
+
+    /**
+     * Часть экрана блокировки для превью (карточки обоев) готовой картинкой в
+     * масштабе s. Видеокарте дорого заново строить сложные часы на каждом новом
+     * масштабе карточки — рисуем программно раз в минуту или при смене настроек,
+     * а карточки только тянут картинку. Пока настройку крутят (ключ меняется
+     * чаще раза в полсекунды), рисуем как есть.
+     */
+    static void drawPreview(Canvas c, String part, int w, int h, int insetTop, float s, java.util.function.Consumer<Canvas> paint) {
+        String key = part + "|" + w + "|" + h + "|" + insetTop + "|" + Math.round(s * 100) + "|" + style() + "|" + Prefs.lockClockColor
+                + "|" + Prefs.lockClockSize + "|" + Prefs.lockClockW + "|" + Prefs.lockClockH + "|" + Prefs.lockClockX + "|" + Prefs.lockClockY
+                + "|" + Prefs.lockWidgetsPos + "|" + Prefs.lockWidgets + "|" + Prefs.fpEffect + "|" + Prefs.fpIcon + "|" + System.identityHashCode(photo())
+                + "|" + Prefs.posterKind + "|" + Prefs.posterFront + "|" + Prefs.posterBack + "|" + Prefs.longDigitW + "|" + Prefs.longStroke
+                + "|" + Ui.accent() + "|" + Prefs.ui + "|" + Prefs.material + "|" + Prefs.tone + "|" + (System.currentTimeMillis() / 60000);
+        Pre e = pres.get(part);
+        long now = android.os.SystemClock.uptimeMillis();
+        if (e == null) pres.put(part, e = new Pre());
+        if (!key.equals(e.key)) {
+            if (e.key != null && now - e.at < 500) e.b = null;   // крутят настройку
+            else e.b = render(Math.round(w * s), Math.round(h * s), s, paint);
+            e.key = key;
+            e.at = now;
+        } else if (e.b == null && now - e.at >= 500) {
+            e.b = render(Math.round(w * s), Math.round(h * s), s, paint);
+        }
+        if (e.b == null) {
+            paint.accept(c);
+            return;
+        }
+        c.drawBitmap(e.b, null, new RectF(0, 0, w, h), bp);
+    }
+
+    private static android.graphics.Bitmap render(int bw, int bh, float s, java.util.function.Consumer<Canvas> paint) {
+        android.graphics.Bitmap b = android.graphics.Bitmap.createBitmap(Math.max(1, bw), Math.max(1, bh), android.graphics.Bitmap.Config.ARGB_8888);
+        Canvas sc = new Canvas(b);
+        sc.scale(s, s);
+        paint.accept(sc);
+        return b;
+    }
+
     static List<String> widgets() {
         ArrayList<String> out = new ArrayList<>();
         for (String s : Prefs.lockWidgets.split(",")) if (Arrays.asList(WIDGETS).contains(s) && !out.contains(s)) out.add(s);

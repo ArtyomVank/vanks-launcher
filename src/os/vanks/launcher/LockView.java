@@ -109,7 +109,9 @@ final class LockView extends View {
         boolean fly = flyTo != null && exitAt >= 0;
         float clockA = fly ? 1 - inOutQuad((t - 640) / 220f) : ca;
         if (clockA > 0.01f) {
-            int sc = c.saveLayerAlpha(0, 0, w, h, Math.round(255 * clockA));
+            // слой прозрачности — только вокруг часов: слой на весь экран
+            // в каждом кадре слабому видеочипу не по силам
+            int sc = c.save();
             if (fly) {
                 float k = flyTo.height() / Math.max(1f, cr.height());
                 float s = 1 + (k - 1) * ce;
@@ -120,12 +122,15 @@ final class LockView extends View {
                 float k = 1 - 0.65f * ce;
                 c.scale(k, k, w / 2f, cr.centerY());
             }
+            c.saveLayerAlpha(cr.left - Ui.dpf(48), cr.top - Ui.dpf(48), cr.right + Ui.dpf(48), cr.bottom + Ui.dpf(96), Math.round(255 * clockA));
             LockFace.drawClock(c, getContext(), w, h, insetTop);
             c.restoreToCount(sc);
         }
         if (ca > 0.01f) {
-            int sc = c.saveLayerAlpha(0, 0, w, h, Math.round(255 * ca));
+            int sc = c.save();
             c.translate(Ui.dpf(60) * ce, 0);
+            android.graphics.RectF wz = LockFace.widgetZone(w, h, insetTop);
+            c.saveLayerAlpha(wz.left - Ui.dpf(32), wz.top - Ui.dpf(32), wz.right + Ui.dpf(32), wz.bottom + Ui.dpf(32), Math.round(255 * ca));
             LockFace.drawWidgets(c, getContext(), w, h, insetTop);
             c.restoreToCount(sc);
         }
@@ -139,9 +144,9 @@ final class LockView extends View {
             postInvalidateOnAnimation();
             return;
         }
-        int fs = c.saveLayerAlpha(0, 0, w, h, Math.round(255 * fa));
         float[] fp = finger();
         float cx = fp[0], cy = fp[1];
+        int fs = c.saveLayerAlpha(0, Math.min(cy, h - insetBottom) - Ui.dpf(170), w, h, Math.round(255 * fa));
         c.translate(0, Ui.dpf(120) * fe);
         c.scale(1 - 0.1f * fe, 1 - 0.1f * fe, cx, cy);
         int acc = error ? 0xFFFF6B6B : Ui.accentLight();

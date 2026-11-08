@@ -175,6 +175,15 @@ final class Prefs {
         setupDone = sp.getBoolean("setupDone", false);
         animSpeed = sp.getFloat("animSpeed", 1f);
         rev = sp.getInt("rev", 0);
+        // слабый телефон (A04 и подобные): стеклянная волна при входе и
+        // движение обоев на столе — выключить, один раз; включить можно снова
+        if (sp.getInt("perfV", 0) < 1) {
+            if (Ui.weak(c)) {
+                unlockWave = false;
+                wallAnimate = false;
+            }
+            sp.edit().putInt("perfV", 1).putBoolean("unlockWave", unlockWave).putBoolean("wallAnimate", wallAnimate).apply();
+        }
     }
 
     static void save() {

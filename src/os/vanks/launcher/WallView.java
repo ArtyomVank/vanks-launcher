@@ -22,7 +22,11 @@ import android.view.View;
  * летит к ним (1,7 с) и кадр замирает. Живые: на экране входа видна часть
  * рисунка (lockPose), при входе он доигрывает и замирает. Пока ничего не
  * движется, шейдер не считается: готовый кадр лежит в слое видеокарты. В
- * движении кадр считается в половину разрешения.
+ * движении кадр считается в половину разрешения (на слабом телефоне — в треть).
+ *
+ * Пока окно не сказало «я на экране» (setPaused(false) из onResume), обои
+ * стоят: стол, запущенный под экраном блокировки, раньше без конца считал
+ * шейдер невидимым — и тормозил весь телефон.
  *
  * Когда открыт пункт управления или поиск, поверх проступает размытая копия
  * (frost) — весь экран становится матовым стеклом.
@@ -43,7 +47,8 @@ final class WallView extends View {
     private float time, intro = 1f, introTarget = 1f, flight = 1f;
     private long flightStart = -1;
     private float flightFrom;
-    private boolean locked, paused, dirty = true, fullRes;
+    private boolean locked, paused = true, dirty = true, fullRes;
+    private final float lowRes;   // разрешение кадра в движении
     private long last, lastRecord;
 
     private final boolean lockLayer;   // свои обои экрана блокировки
@@ -55,6 +60,12 @@ final class WallView extends View {
     WallView(Context c, boolean lockLayer) {
         super(c);
         this.lockLayer = lockLayer;
+        lowRes = Ui.weak(c) ? 0.34f : 0.5f;
+    }
+
+    /** Какие обои сейчас (null — ещё не загружены). */
+    Walls.W spec() {
+        return spec;
     }
 
     private Walls.W wanted() {
@@ -283,13 +294,13 @@ final class WallView extends View {
         // не знает, что надо перерисовать. Без этой проверки — чёрный экран
         boolean lost = !node.hasDisplayList();
         if (lost || animating || dirty || (fullRes != !animating)) {
-            // в движении — полразрешения и не чаще 30 кадров, кроме полёта
+            // в движении — меньше разрешение и не чаще 30 кадров, кроме полёта
             if (lost || !animating || moving || now - lastRecord >= 30) {
                 record(w, h, !animating);
                 lastRecord = now;
             }
         }
-        float s = fullRes ? 1f : 0.5f;
+        float s = fullRes ? 1f : lowRes;
         c.save();
         c.scale(w / (float) Math.max(1, Math.round(w * s)), h / (float) Math.max(1, Math.round(h * s)));
         c.drawRenderNode(node);
@@ -299,7 +310,7 @@ final class WallView extends View {
 
     private void record(int w, int h, boolean full) {
         fullRes = full;
-        float s = full ? 1f : 0.5f;
+        float s = full ? 1f : lowRes;
         int lw = Math.max(1, Math.round(w * s)), lh = Math.max(1, Math.round(h * s));
         uniforms(shader, spec, lw, lh, intro, flight, time);
         sp.setShader(shader);

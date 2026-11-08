@@ -613,6 +613,13 @@ public final class SettingsActivity extends Activity {
         FingerSensor.cancel();
     }
 
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // картинки выбора обоев — не держать в памяти стола
+        Ui.dropPics();
+    }
+
     private void filter(String q) {
         String s = q.trim().toLowerCase(new Locale("ru"));
         if (quick != null) quick.setVisibility(s.isEmpty() ? View.VISIBLE : View.GONE);
@@ -921,19 +928,17 @@ public final class SettingsActivity extends Activity {
     private final class WallGrid extends View {
         private static final int COLS = 3;
         private final List<Walls.W> walls;
-        private final Bitmap[] thumbs;
         private final Runnable picked;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        private final android.graphics.Matrix m = new android.graphics.Matrix();
         private final RectF r = new RectF();
-        private final android.graphics.Path clip = new android.graphics.Path();
+        private final android.graphics.Rect vis = new android.graphics.Rect();
 
         WallGrid(List<Walls.W> walls, Runnable picked) {
             super(SettingsActivity.this);
             this.walls = walls;
             this.picked = picked;
-            thumbs = new Bitmap[walls.size()];
-            for (int i = 0; i < thumbs.length; i++) thumbs[i] = Ui.wallThumb(SettingsActivity.this, walls.get(i));
+            // картинки читаются в фоне по очереди, страница открывается сразу
+            for (Walls.W w : walls) Ui.wallThumb(SettingsActivity.this, w, this);
         }
 
         private float gap() { return Ui.dpf(10); }
@@ -954,20 +959,16 @@ public final class SettingsActivity extends Activity {
             Paint t = Ui.text(Ui.medium, 12, 0xFFFFFFFF);
             t.setTextAlign(Paint.Align.CENTER);
             Walls.W cur = Walls.current();
+            boolean clipped = c.getClipBounds(vis);
             for (int i = 0; i < walls.size(); i++) {
                 Walls.W w = walls.get(i);
                 float x = Ui.dpf(16) + (i % COLS) * (cardW() + gap()), y = Ui.dpf(6) + (i / COLS) * rowH();
                 r.set(x, y, x + cardW(), y + cardH());
-                c.save();
-                clip.reset();
-                clip.addRoundRect(r, Ui.dpf(12), Ui.dpf(12), android.graphics.Path.Direction.CW);
-                c.clipPath(clip);
-                Bitmap b = thumbs[i];
-                float s = Math.max(r.width() / b.getWidth(), r.height() / b.getHeight());
-                m.setScale(s, s);
-                m.postTranslate(r.centerX() - b.getWidth() * s / 2, r.centerY() - b.getHeight() * s / 2);
-                c.drawBitmap(b, m, p);
-                c.restore();
+                // за краем прокрутки — не рисовать
+                if (clipped && (r.bottom + Ui.dpf(30) < vis.top || r.top > vis.bottom)) continue;
+                Bitmap b = Ui.wallThumb(SettingsActivity.this, w, this);
+                if (b != null) Ui.drawCover(c, b, r, Ui.dpf(12), p, 1f);
+                else Ui.picHolder(c, r, Ui.dpf(12));
                 if (w.kind != Walls.PHOTO) {
                     // значок «живые»: три точки-волны в углу
                     p.setStyle(Paint.Style.FILL);
@@ -1424,12 +1425,8 @@ public final class SettingsActivity extends Activity {
         final List<Walls.W> walls = Walls.all();
         float pos;
         Runnable changed;
-        private final Bitmap[] small;
-        private final java.util.HashMap<Integer, Bitmap> sharp = new java.util.HashMap<>();
-        private Bitmap peakFg;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         private final android.graphics.Matrix m = new android.graphics.Matrix();
-        private final android.graphics.Path clip = new android.graphics.Path();
         private final RectF r = new RectF();
         private float x0, y0, pos0;
         private boolean dragging;
@@ -1439,10 +1436,11 @@ public final class SettingsActivity extends Activity {
 
         WallStack() {
             super(SettingsActivity.this);
-            small = new Bitmap[walls.size()];
             String start = Prefs.lockWallpaper.isEmpty() ? Prefs.wallpaper : Prefs.lockWallpaper;
             for (int i = 0; i < walls.size(); i++) if (walls.get(i).id.equals(start)) pos = i;
             last = Math.round(pos);
+            // маленькие картинки всех обоев — заранее, в фоне
+            for (Walls.W w : walls) Ui.wallThumb(SettingsActivity.this, w, this);
         }
 
         Walls.W current() {
@@ -1451,7 +1449,7 @@ public final class SettingsActivity extends Activity {
 
         void go(int i) {
             if (anim != null) anim.cancel();
-            anim = Anim.spring(pos, Math.max(0, Math.min(walls.size() - 1, i)), 0, 200, 0.85f, this::setPos, null);
+            anim = Anim.spring(pos, Math.max(0, Math.min(walls.size() - 1, i)), 0, 200, 0.85f, this::setPos, this::invalidate);
         }
 
         private void setPos(float v) {
@@ -1465,21 +1463,12 @@ public final class SettingsActivity extends Activity {
             invalidate();
         }
 
+        /** Картинка карточки: средняя — крупная (пока читается — маленькая); null — ещё нет. */
         private Bitmap thumb(int i, boolean big) {
-            if (big) {
-                Bitmap b = sharp.get(i);
-                if (b == null) {
-                    if (sharp.size() > 2) sharp.clear();
-                    android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
-                    o.inScaled = false;
-                    o.inSampleSize = 2;
-                    b = android.graphics.BitmapFactory.decodeResource(getResources(), walls.get(i).still, o);
-                    sharp.put(i, b);
-                }
-                return b;
-            }
-            if (small[i] == null) small[i] = Ui.wallThumb(SettingsActivity.this, walls.get(i));
-            return small[i];
+            // крупную — только когда листание встало, иначе чтение на каждом шаге
+            Walls.W w = walls.get(i);
+            return big && (anim == null || !anim.isRunning()) && !dragging
+                    ? Ui.wallBig(SettingsActivity.this, w, this) : Ui.wallThumb(SettingsActivity.this, w, this);
         }
 
         private float cardH() { return getHeight() - Ui.dpf(24); }
@@ -1493,7 +1482,6 @@ public final class SettingsActivity extends Activity {
             Integer[] order = new Integer[walls.size()];
             for (int i = 0; i < order.length; i++) order[i] = i;
             Arrays.sort(order, (a, b) -> Float.compare(Math.abs(b - pos), Math.abs(a - pos)));
-            boolean anim2 = false;
             for (int i : order) {
                 float d = i - pos, ad = Math.abs(d);
                 if (ad > 3.2f) continue;
@@ -1503,18 +1491,15 @@ public final class SettingsActivity extends Activity {
                 c.translate(cx + off, cy);
                 c.scale(s, s);
                 r.set(-cw / 2, -ch / 2, cw / 2, ch / 2);
-                clip.reset();
-                clip.addRoundRect(r, Ui.dpf(22), Ui.dpf(22), android.graphics.Path.Direction.CW);
-                c.save();
-                c.clipPath(clip);
+                // скругление — заливкой картинкой, без clipPath (он дорог видеочипу)
                 Bitmap b = thumb(i, ad < 0.6f);
-                float k = Math.max(r.width() / b.getWidth(), r.height() / b.getHeight());
-                m.setScale(k, k);
-                m.postTranslate(-b.getWidth() * k / 2, -b.getHeight() * k / 2);
-                c.drawBitmap(b, m, p);
-                if (ad < 1.5f) anim2 |= drawLock(c, walls.get(i), r);
-                if (ad > 0.01f) c.drawColor(Ui.alpha(0xFF000000, 0.42f * Math.min(ad, 1.4f)));
-                c.restore();
+                if (b != null) Ui.drawCover(c, b, r, Ui.dpf(22), p, 1f);
+                else Ui.picHolder(c, r, Ui.dpf(22));
+                if (ad < 1.5f) drawLock(c, walls.get(i), r);
+                if (ad > 0.01f) {
+                    p.setColor(Ui.alpha(0xFF000000, 0.42f * Math.min(ad, 1.4f)));
+                    c.drawRoundRect(r, Ui.dpf(22), Ui.dpf(22), p);
+                }
                 if (ad < 0.5f) {
                     p.setStyle(Paint.Style.STROKE);
                     p.setStrokeWidth(Ui.dpf(1));
@@ -1524,33 +1509,33 @@ public final class SettingsActivity extends Activity {
                 }
                 c.restore();
             }
-            if (anim2) postInvalidateDelayed(33);
         }
 
-        /** Экран блокировки в карточке: часы, глубина, отпечаток. true — отпечаток живой. */
-        private boolean drawLock(Canvas c, Walls.W w, RectF card) {
+        /** Экран блокировки в карточке: часы, глубина, отпечаток (неподвижный — стопка не перерисовывается без конца). */
+        private void drawLock(Canvas c, Walls.W w, RectF card) {
             float sw = getResources().getDisplayMetrics().widthPixels, sh = getResources().getDisplayMetrics().heightPixels;
             float k = card.width() / sw;
             c.save();
             c.translate(card.left, card.top);
             c.scale(k, card.height() / sh);
-            c.drawColor(0x2E000000);
-            LockFace.drawClock(c, getContext(), (int) sw, (int) sh, Ui.dp(32));
-            LockFace.drawWidgets(c, getContext(), (int) sw, (int) sh, Ui.dp(32));
+            p.setColor(0x2E000000);
+            c.drawRoundRect(0, 0, sw, sh, Ui.dpf(22) / k, Ui.dpf(22) * sh / card.height(), p);
+            // часы и виджеты — одной готовой картинкой (карточки всё время меняют масштаб)
+            LockFace.drawPreview(c, "stack", (int) sw, (int) sh, Ui.dp(32), 0.5f, sc -> {
+                LockFace.drawClock(sc, getContext(), (int) sw, (int) sh, Ui.dp(32));
+                LockFace.drawWidgets(sc, getContext(), (int) sw, (int) sh, Ui.dp(32));
+            });
             if (Prefs.depth && w.fg != 0) {
-                if (peakFg == null) {
-                    android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
-                    o.inScaled = false;
-                    o.inSampleSize = 2;
-                    peakFg = android.graphics.BitmapFactory.decodeResource(getResources(), w.fg, o);
-                }
-                c.drawBitmap(peakFg, Ui.wallMatrix(peakFg, (int) sw, (int) sh, 1f, m), p);
+                Bitmap fg = Ui.wallPic(SettingsActivity.this, w.fg, 2, true, this);
+                if (fg != null) c.drawBitmap(fg, Ui.wallMatrix(fg, (int) sw, (int) sh, 1f, m), p);
             }
             float fy = sh - Ui.dpf(150);
-            LockView.fingerEffect(c, sw / 2f, fy, android.os.SystemClock.uptimeMillis(), Ui.accentLight(), Prefs.fpEffect);
-            LockFace.drawFinger(c, sw / 2f, fy, Ui.accentLight());
+            // кадр эффекта отпечатка — один, неподвижный
+            LockFace.drawPreview(c, "stackFp", (int) sw, (int) sh, Ui.dp(32), 0.5f, sc -> {
+                LockView.fingerEffect(sc, sw / 2f, fy, 600, Ui.accentLight(), Prefs.fpEffect);
+                LockFace.drawFinger(sc, sw / 2f, fy, Ui.accentLight());
+            });
             c.restore();
-            return !"none".equals(Prefs.fpEffect);
         }
 
         @Override
@@ -1591,7 +1576,7 @@ public final class SettingsActivity extends Activity {
                         float target = Math.round(pos - vx / step * 0.18f);
                         target = Math.max(0, Math.min(walls.size() - 1, target));
                         if (anim != null) anim.cancel();
-                        anim = Anim.spring(pos, target, -vx / step, 200, 0.86f, this::setPos, null);
+                        anim = Anim.spring(pos, target, -vx / step, 200, 0.86f, this::setPos, this::invalidate);
                     } else if (e.getActionMasked() == MotionEvent.ACTION_UP) {
                         // нажатие: боковая — к ней, средняя — применить
                         float d = (e.getX() - getWidth() / 2f) / step;
@@ -1974,11 +1959,8 @@ public final class SettingsActivity extends Activity {
          * размер, по пустому — листает обои.
          */
         private final class Card extends View {
-            private final java.util.HashMap<Integer, Bitmap> bmps = new java.util.HashMap<>();
-            private final java.util.HashMap<Integer, Bitmap> fgs = new java.util.HashMap<>();
             private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
             private final android.graphics.Matrix m = new android.graphics.Matrix();
-            private final android.graphics.Path clip = new android.graphics.Path();
             private float reserved;          // сколько снизу занял лист
             private int mode;                // 0 — листаем, 1 — часы, 2 — ширина, 3 — высота, 4 — размер, 5 — виджеты
             private float downX, downY, startA, startB, pos0;
@@ -2009,31 +1991,13 @@ public final class SettingsActivity extends Activity {
                 return out;
             }
 
+            /** Обои карточки (читаются в фоне; пока нет — null). */
             private Bitmap wall(int i) {
-                Bitmap b = bmps.get(i);
-                if (b == null) {
-                    if (bmps.size() > 4) bmps.clear();
-                    android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
-                    o.inScaled = false;
-                    o.inSampleSize = 2;
-                    b = android.graphics.BitmapFactory.decodeResource(getResources(), walls.get(i).still, o);
-                    bmps.put(i, b);
-                }
-                return b;
+                return Ui.wallBig(SettingsActivity.this, walls.get(i), this);
             }
 
             private Bitmap fg(int i) {
-                Walls.W w = walls.get(i);
-                if (w.fg == 0) return null;
-                Bitmap b = fgs.get(i);
-                if (b == null) {
-                    android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
-                    o.inScaled = false;
-                    o.inSampleSize = 2;
-                    b = android.graphics.BitmapFactory.decodeResource(getResources(), w.fg, o);
-                    fgs.put(i, b);
-                }
-                return b;
+                return Ui.wallPic(SettingsActivity.this, walls.get(i).fg, 2, true, this);
             }
 
             @Override
@@ -2057,26 +2021,34 @@ public final class SettingsActivity extends Activity {
 
             /** Экран блокировки i в карточке r. edit — рамки часов и виджетов. */
             private void drawScreen(Canvas c, int i, RectF r, boolean edit) {
-                float f = r.width() / sw;
+                float f = r.width() / sw, rad = Ui.dpf(30);
+                // без clipPath (дорого на каждой карточке): картинки — шейдером в скруглённой рамке
+                Bitmap b = wall(i);
+                p.setColor(0xFF1C1C22);
+                if (b != null) Ui.drawCover(c, b, r, rad, p, 1.06f);
+                else c.drawRoundRect(r, rad, rad, p);
+                p.setColor(0x2E000000);
+                c.drawRoundRect(r, rad, rad, p);
                 c.save();
-                clip.reset();
-                clip.addRoundRect(r, Ui.dpf(30), Ui.dpf(30), android.graphics.Path.Direction.CW);
-                c.clipPath(clip);
                 c.translate(r.left, r.top);
                 c.scale(f, f);
-                Bitmap b = wall(i);
-                float k = Math.max(sw / (float) b.getWidth(), sh / (float) b.getHeight()) * 1.06f;
-                m.setScale(k, k);
-                m.postTranslate((sw - b.getWidth() * k) / 2f, (sh - b.getHeight() * k) / 2f);
-                c.drawBitmap(b, m, p);
-                c.drawColor(0x2E000000);
-                LockFace.drawClock(c, getContext(), sw, sh, insetTop());
-                Bitmap fg = fg(i);
-                if (Prefs.depth && fg != null) c.drawBitmap(fg, m, p);
-                LockFace.drawWidgets(c, getContext(), sw, sh, insetTop());
+                LockFace.drawPreview(c, "edit", sw, sh, insetTop(), 0.75f, sc -> LockFace.drawClock(sc, getContext(), sw, sh, insetTop()));
+                c.restore();
+                Bitmap fg = Prefs.depth ? fg(i) : null;
+                if (fg != null && b != null) {
+                    // передний план — другого размера, чем фон: свой масштаб
+                    p.setColor(0xFF000000);
+                    Ui.drawCover(c, fg, r, rad, p, 1.06f);
+                }
+                c.save();
+                c.translate(r.left, r.top);
+                c.scale(f, f);
                 // отпечаток внизу
                 float fy = sh - insetBottom() - Ui.dpf(118);
-                LockFace.drawFinger(c, sw / 2f, fy, Ui.accentLight());
+                LockFace.drawPreview(c, "editTop", sw, sh, insetTop(), 0.75f, sc -> {
+                    LockFace.drawWidgets(sc, getContext(), sw, sh, insetTop());
+                    LockFace.drawFinger(sc, sw / 2f, fy, Ui.accentLight());
+                });
                 c.restore();
                 p.setStyle(Paint.Style.STROKE);
                 p.setStrokeWidth(Ui.dpf(1));

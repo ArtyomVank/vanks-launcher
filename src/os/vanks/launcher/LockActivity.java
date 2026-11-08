@@ -269,6 +269,7 @@ public final class LockActivity extends Activity {
         lock.setAlpha(1);
         wall.animate().cancel();
         wall.setAlpha(1);
+        wall.setVisibility(View.VISIBLE);
         wall.lockNow();
         Home.lockPose();
         lock.invalidate();
@@ -614,10 +615,17 @@ public final class LockActivity extends Activity {
         root.setBackground(null);
         if (pad.getVisibility() == View.VISIBLE) pad.close();
         lock.playExit(() -> {});
-        wall.unlock();
+        // волне нужны свои обои под ней — без волны их можно спрятать
+        if (!Prefs.unlockWave && Home.wallUnder(wall.spec())) {
+            // под нами стол с теми же обоями в той же позе — анимирует он
+            wall.setPaused(true);
+            wall.setVisibility(View.INVISIBLE);
+        } else {
+            wall.unlock();
+            long k = (long) (700 * Prefs.k());
+            wall.animate().alpha(0).setStartDelay(160).setDuration(k).setInterpolator(Anim.STD).start();
+        }
         if (Prefs.unlockWave) GlassWave.play(root, root.getWidth() / 2f, root.getHeight() / 2f, 1f, 1700);
-        long k = (long) (700 * Prefs.k());
-        wall.animate().alpha(0).setStartDelay(160).setDuration(k).setInterpolator(Anim.STD).start();
         ui.postDelayed(gone, (long) (900 * Prefs.k()));
     }
 
