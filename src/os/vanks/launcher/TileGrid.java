@@ -38,7 +38,7 @@ final class TileGrid extends View {
     }
 
     static final String[] TYPES = {"wifi", "bt", "media", "torch", "dnd", "airplane", "rotate", "bright", "volume",
-            "camera", "calc", "alarm", "timer", "battery", "settings"};
+            "camera", "calc", "alarm", "timer", "battery", "settings", "vpn", "location", "saver", "hotspot"};
 
     static String title(String t) {
         switch (t) {
@@ -57,6 +57,14 @@ final class TileGrid extends View {
             case "timer": return "Таймер";
             case "battery": return "Батарея";
             case "settings": return "Настройки";
+            case "vpn": return "VPN";
+            case "location": return "Геолокация";
+            case "saver": return "Экономия заряда";
+            case "hotspot": return "Точка доступа";
+        }
+        if (QsTiles.is(t)) {
+            QsTiles.Entry e = QsTiles.get(t);
+            return e == null ? "Плитка" : e.label;
         }
         return t;
     }
@@ -73,10 +81,12 @@ final class TileGrid extends View {
 
     final ArrayList<T> list = new ArrayList<>();
     boolean edit;
+    /** Долгое нажатие — правка (в шторке Vanks OS правки нет, только в пункте управления). */
+    boolean editable = true;
     Host host;
 
     // состояние для плиток (заполняет главный экран)
-    boolean wifi, bt, torch, dnd, airplane, rotate, playing;
+    boolean wifi, bt, torch, dnd, airplane, rotate, playing, vpn, location, saver;
     String wifiName, btName;
     float bright = 0.5f, volume = 0.5f;
     int battery = -1;
@@ -112,6 +122,8 @@ final class TileGrid extends View {
         pad = Ui.dpf(18);
         addH = Ui.dpf(52);
         slop = ViewConfiguration.get(c).getScaledTouchSlop();
+        // плитки приложений нужны уже при чтении списка (их названия и значки)
+        QsTiles.all(c);
         load(Prefs.tiles);
         gd = new GestureDetector(c, new GestureDetector.SimpleOnGestureListener() {
             @Override
@@ -145,7 +157,7 @@ final class TileGrid extends View {
 
             @Override
             public void onLongPress(MotionEvent e) {
-                if (mode == SLIDE && moved) return;
+                if (!editable || mode == SLIDE && moved) return;
                 T t = at(e.getX(), e.getY());
                 if (t == null) return;
                 performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
@@ -196,7 +208,8 @@ final class TileGrid extends View {
 
     private static boolean known(String t) {
         for (String k : TYPES) if (k.equals(t)) return true;
-        return false;
+        // плитка приложения — пока приложение стоит
+        return QsTiles.is(t) && QsTiles.get(t) != null;
     }
 
     private static boolean allowed(String t, int w, int h) {
@@ -363,6 +376,13 @@ final class TileGrid extends View {
             case "dnd": return dnd;
             case "airplane": return airplane;
             case "rotate": return rotate;
+            case "vpn": return vpn;
+            case "location": return location;
+            case "saver": return saver;
+        }
+        if (QsTiles.is(type)) {
+            QsTiles.Entry e = QsTiles.get(type);
+            return e != null && e.vpn && vpn;
         }
         return false;
     }
@@ -375,7 +395,10 @@ final class TileGrid extends View {
             case "airplane": return 0xFFFF9F2E;
             case "dnd": return 0xFF7B6CFF;
             case "torch": case "rotate": return 0xFFFFFFFF;
+            case "location": return 0xFF3E8BFF;
+            case "saver": return 0xFFFFB020;
         }
+        if (type.equals("vpn") || QsTiles.is(type)) return 0xFF2FBF71;
         return Ui.accent();
     }
 
@@ -413,7 +436,7 @@ final class TileGrid extends View {
         }
     }
 
-    private void glyph(Canvas c, String type, float cx, float cy, float s, int col, boolean on) {
+    static void glyph(Canvas c, String type, float cx, float cy, float s, int col, boolean on) {
         switch (type) {
             case "wifi": Glyph.wifi(c, cx, cy, s, col); break;
             case "bt": Glyph.bluetooth(c, cx, cy, s, col); break;
@@ -427,6 +450,20 @@ final class TileGrid extends View {
             case "settings": Glyph.gear(c, cx, cy, s, col); break;
             case "bright": Glyph.sun(c, cx, cy, s, col); break;
             case "volume": Glyph.speaker(c, cx, cy, s, col); break;
+            case "vpn": Glyph.vpn(c, cx, cy, s, col); break;
+            case "location": Glyph.pin(c, cx, cy, s, col); break;
+            case "saver": Glyph.battery(c, cx, cy, s, col, 0.35f); break;
+            case "hotspot": Glyph.hotspot(c, cx, cy, s, col); break;
+            default:
+                if (QsTiles.is(type)) {
+                    // значок плитки приложения — одноцветный, красим как свои
+                    QsTiles.Entry e = QsTiles.get(type);
+                    if (e == null || e.icon == null) break;
+                    int h = Math.round(s * 0.36f);
+                    e.icon.setBounds(Math.round(cx) - h, Math.round(cy) - h, Math.round(cx) + h, Math.round(cy) + h);
+                    e.icon.setTint(col);
+                    e.icon.draw(c);
+                }
         }
     }
 
@@ -434,13 +471,17 @@ final class TileGrid extends View {
         switch (type) {
             case "wifi": return on ? (wifiName != null ? wifiName : "Подключено") : "Выкл.";
             case "bt": return on ? (btName != null ? btName : "Вкл.") : "Выкл.";
-            case "torch": case "dnd": case "airplane": return on ? "Вкл." : "Выкл.";
+            case "torch": case "dnd": case "airplane": case "vpn": case "location": case "saver": return on ? "Вкл." : "Выкл.";
             case "rotate": return on ? "Вкл." : "Заблокирован";
             case "timer": return "Запустить";
             case "alarm": {
                 String a = ClockView.nextAlarm(getContext());
                 return a == null ? "Нет" : a;
             }
+        }
+        if (QsTiles.is(type)) {
+            QsTiles.Entry e = QsTiles.get(type);
+            if (e != null) return e.vpn ? (on ? "Вкл." : "Выкл.") : e.app;
         }
         return "Открыть";
     }

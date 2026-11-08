@@ -76,11 +76,14 @@ final class Prefs {
     static String lockWidgets = "";  // виджеты экрана блокировки, столбиком справа
     static String fpEffect = "pulse";    // отпечаток: pulse / ripple / glow / none
     static boolean lockMain = false;    // свой экран блокировки (отдельно от стола) — основной
+    static String aodMode = "off";      // «Всегда на экране»: off / 10s — 10 секунд / always — пока не включат
+    static String aodStyle = "big";     // вид AOD: big — крупные цифры, dim — приглушённый экран блокировки
     static boolean fpAuto = true;       // значок отпечатка — над самим датчиком
     static float fpY = -1f;             // место значка вручную: доля высоты снизу; -1 — как раньше
     static String fpIcon = "classic";    // вид отпечатка: classic / glass / bare / ring / photo (своё фото)
     static boolean unlockWave = true;    // стеклянная волна при входе
     static float animSpeed = 1f;         // скорость анимаций: 0,5 — медленнее, 2 — быстрее
+    static boolean setupDone = false;    // Vanks OS: мастер первого запуска пройден
     static boolean firstRun = true;
     static int rev = 0;
 
@@ -162,10 +165,14 @@ final class Prefs {
         lockWidgetsPos = sp.getString("lockWidgetsPos", "under");
         fpEffect = sp.getString("fpEffect", "pulse");
         fpIcon = sp.getString("fpIcon", "classic");
-        lockMain = sp.getBoolean("lockMain", false);
+        // в Vanks OS свой экран блокировки — единственный (системный выключен в прошивке)
+        lockMain = sp.getBoolean("lockMain", Updater.osVersion() != null);
+        aodMode = sp.getString("aodMode", "off");
+        aodStyle = sp.getString("aodStyle", "big");
         fpAuto = sp.getBoolean("fpAuto", true);
         fpY = sp.getFloat("fpY", -1f);
         unlockWave = sp.getBoolean("unlockWave", true);
+        setupDone = sp.getBoolean("setupDone", false);
         animSpeed = sp.getFloat("animSpeed", 1f);
         rev = sp.getInt("rev", 0);
     }
@@ -222,6 +229,8 @@ final class Prefs {
                 .putString("fpEffect", fpEffect)
                 .putString("fpIcon", fpIcon)
                 .putBoolean("lockMain", lockMain)
+                .putString("aodMode", aodMode)
+                .putString("aodStyle", aodStyle)
                 .putInt("hz", hz)
                 .putFloat("gestSens", gestSens)
                 .putFloat("gestTop", gestTop)
@@ -246,6 +255,7 @@ final class Prefs {
                 .putBoolean("fpAuto", fpAuto)
                 .putFloat("fpY", fpY)
                 .putBoolean("unlockWave", unlockWave)
+                .putBoolean("setupDone", setupDone)
                 .putFloat("animSpeed", animSpeed)
                 .putInt("rev", rev)
                 .apply();

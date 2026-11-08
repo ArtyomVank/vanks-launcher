@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="os.vanks.launcher"
-    android:versionCode="23"
-    android:versionName="0.23">
+    android:versionCode="24"
+    android:versionName="0.24">
 
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="36" />
 
@@ -33,6 +33,25 @@
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <!-- жесты вместо кнопок на HyperOS: выдаётся только с компьютера (adb shell pm grant) -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- только в Vanks OS (системное приложение, rom/a04): «Обвести и найти»,
+         обновления без подтверждения, все задачи для «Недавних». На обычном
+         телефоне Android их просто не выдаёт. -->
+    <!-- камера Vanks -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-permission android:name="android.permission.ACCESS_CONTEXTUAL_SEARCH" />
+    <uses-permission android:name="android.permission.INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.REAL_GET_TASKS" />
+    <!-- Vanks OS: экран блокировки и AOD из фона без «Поверх других приложений» -->
+    <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
+    <!-- Vanks OS: системная шторка не раскрывается, сверху — панель Vanks -->
+    <uses-permission android:name="android.permission.STATUS_BAR" />
+    <!-- Vanks OS: плитка «Экономия заряда» включает режим сама -->
+    <uses-permission android:name="android.permission.POWER_SAVER" />
+    <!-- Vanks OS: язык системы в мастере первого запуска -->
+    <uses-permission android:name="android.permission.CHANGE_CONFIGURATION" />
+    <!-- шторка: имя и значок любого приложения, приславшего уведомление -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <!-- видеть все приложения, у которых есть значок -->
     <queries>
@@ -81,6 +100,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Vanks OS: мастер первого запуска (открывает стол, пока не пройден) -->
+        <activity
+            android:name=".SetupActivity"
+            android:exported="false"
+            android:theme="@style/VanksLock"
+            android:launchMode="singleTask"
+            android:taskAffinity="os.vanks.launcher.setup"
+            android:excludeFromRecents="true"
+            android:screenOrientation="portrait"
+            android:configChanges="locale|layoutDirection|orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|smallestScreenSize|fontScale" />
         <activity
             android:name=".SettingsActivity"
             android:exported="true"
@@ -108,6 +137,29 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- камера Vanks: своё место в «Недавних» и свой значок -->
+        <activity
+            android:name=".CameraActivity"
+            android:exported="true"
+            android:label="@string/camera_name"
+            android:icon="@mipmap/ic_camera"
+            android:roundIcon="@mipmap/ic_camera"
+            android:taskAffinity="os.vanks.launcher.camera"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.action.STILL_IMAGE_CAMERA" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.action.IMAGE_CAPTURE" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
         <activity
@@ -150,6 +202,17 @@
             android:excludeFromRecents="true"
             android:noHistory="false"
             android:showWhenLocked="true"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|smallestScreenSize|fontScale" />
+        <activity
+            android:name=".AodActivity"
+            android:exported="false"
+            android:theme="@style/VanksAod"
+            android:launchMode="singleInstance"
+            android:taskAffinity="os.vanks.launcher.aod"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
             android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|smallestScreenSize|fontScale" />
         <service

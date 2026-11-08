@@ -342,10 +342,19 @@ public final class Home extends Activity {
         }
         // «домой» с экрана блокировки — он снова сверху
         if (Prefs.lockMain && LockActivity.locked) LockActivity.show(this);
+        // Vanks OS: первый запуск — сначала мастер (после входа с экрана блокировки)
+        else if (Updater.osVersion() != null && !Prefs.setupDone)
+            startActivity(new Intent(this, SetupActivity.class));
         readState();
         desk.invalidateAll();
         wall.setPaused(false);
         Updater.maybeCheck(this);
+        // жесты Vanks включены, а служба нет — включить её самим, если есть право
+        // (Vanks OS даёт его системному лаунчеру, иначе — adb pm grant); без
+        // права не дёргаем: страницу служб открывает переключатель в настройках
+        if (Prefs.navGestures && !VanksAccess.running() && Nav.canWrite(this)) VanksAccess.turnOn(this);
+        // Vanks OS: шторка одна — Vanks, ей нужны уведомления
+        if (Updater.osVersion() != null) VanksNotes.enable(this);
         // вошли поверх другого приложения, а стол открыли сейчас — появление обоев здесь
         if (!locked && wall.lockPose() && !(Prefs.lockMain && LockActivity.locked)) wall.unlock();
         if (returning) {
@@ -1368,22 +1377,22 @@ public final class Home extends Activity {
 
     // ── плитки пункта управления ──────────────────────────────────────────
 
+    /** Выбор плитки (всё, чего ещё нет) — сплошное окно со значками, по разделам. */
     void chooseTile() {
-        ArrayList<String> free = new ArrayList<>();
-        for (String t : TileGrid.TYPES) if (!control.tiles.has(t)) free.add(t);
-        if (free.isEmpty()) {
-            toast("Все элементы уже добавлены");
+        AlertDialog[] dlg = new AlertDialog[1];
+        View v = TilePicker.build(this, control.tiles, t -> {
+            control.tiles.add(t);
+            seenRev = Prefs.rev;
+            Feel.buzz(root, Feel.CLICK);
+            dlg[0].dismiss();
+        });
+        if (v == null) {
+            toast("Все плитки уже добавлены");
             return;
         }
-        String[] names = new String[free.size()];
-        for (int i = 0; i < names.length; i++) names[i] = TileGrid.title(free.get(i));
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Добавить в пункт управления")
-                .setItems(names, (d, i) -> {
-                    control.tiles.add(free.get(i));
-                    seenRev = Prefs.rev;
-                })
-                .show();
+        dlg[0] = new AlertDialog.Builder(this).setView(v).create();
+        dlg[0].show();
+        if (dlg[0].getWindow() != null) dlg[0].getWindow().setBackgroundDrawable(Views.round(Look.surface(), 24));
     }
 
     void tileTap(String type) {
@@ -1433,6 +1442,9 @@ public final class Home extends Activity {
                 openSettings(null);
                 opened = true;
                 break;
+            default:
+                // VPN, геолокация, экономия заряда, точка доступа, плитки приложений
+                opened = Tiles.tap(this, type, control.tiles);
         }
         if (opened) closeAllLater();
     }
@@ -1579,6 +1591,7 @@ public final class Home extends Activity {
             t.volume = max > 0 ? am.getStreamVolume(AudioManager.STREAM_MUSIC) / (float) max : 0;
             t.playing = am.isMusicActive();
         }
+        Tiles.readMore(this, t);
         t.invalidate();
     }
 
@@ -1670,6 +1683,8 @@ public final class Home extends Activity {
     }
 
     private void expandNotifications() {
+        // Vanks OS: своя шторка вместо системной
+        if (Shade.open()) return;
         try {
             @SuppressWarnings("WrongConstant") Object sb = getSystemService("statusbar");
             Class.forName("android.app.StatusBarManager").getMethod("expandNotificationsPanel").invoke(sb);
@@ -1730,7 +1745,11 @@ public final class Home extends Activity {
             if (dy > 0 && dy > Math.abs(dx) * 1.3f) {
                 boolean top = y0 < getHeight() * Prefs.gestTop;
                 boolean right = x0 >= getWidth() * 0.5f;
-                if (top && right == Prefs.ctrlRight) return CONTROL;
+                if (top && right == Prefs.ctrlRight) {
+                    // Vanks OS: пункт управления один — тот, что открывается и поверх приложений
+                    if (Updater.osVersion() != null && Shade.open(true)) return NONE;
+                    return CONTROL;
+                }
                 if (top) {
                     expandNotifications();
                     return NONE;

@@ -57,19 +57,8 @@ public final class VanksNotes extends NotificationListenerService {
 
     /** Доступ к уведомлениям: сами (WRITE_SECURE_SETTINGS) или страница в настройках. */
     static boolean turnOn(android.app.Activity a) {
-        if (allowed(a)) return true;
+        if (allowed(a) || enable(a)) return true;
         ComponentName me = new ComponentName(a, VanksNotes.class);
-        if (Nav.canWrite(a)) {
-            try {
-                android.content.ContentResolver cr = a.getContentResolver();
-                String list = android.provider.Settings.Secure.getString(cr, "enabled_notification_listeners");
-                String s = me.flattenToString();
-                list = list == null || list.isEmpty() ? s : list.contains(s) ? list : list + ":" + s;
-                android.provider.Settings.Secure.putString(cr, "enabled_notification_listeners", list);
-                return true;
-            } catch (RuntimeException ignored) {
-            }
-        }
         android.content.Intent i = android.os.Build.VERSION.SDK_INT >= 30
                 ? new android.content.Intent("android.settings.NOTIFICATION_LISTENER_DETAIL_SETTINGS")
                         .putExtra("android.provider.extra.NOTIFICATION_LISTENER_COMPONENT_NAME", me.flattenToString())
@@ -80,6 +69,22 @@ public final class VanksNotes extends NotificationListenerService {
             try { a.startActivity(new android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")); } catch (RuntimeException ignored) {}
         }
         return false;
+    }
+
+    /** Дать себе доступ к уведомлениям без окна (нужно WRITE_SECURE_SETTINGS). true — дали. */
+    static boolean enable(Context c) {
+        if (allowed(c)) return true;
+        if (!Nav.canWrite(c)) return false;
+        String s = new ComponentName(c, VanksNotes.class).flattenToString();
+        try {
+            android.content.ContentResolver cr = c.getContentResolver();
+            String list = android.provider.Settings.Secure.getString(cr, "enabled_notification_listeners");
+            list = list == null || list.isEmpty() ? s : list + ":" + s;
+            android.provider.Settings.Secure.putString(cr, "enabled_notification_listeners", list);
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     static boolean allowed(Context c) {
@@ -118,11 +123,13 @@ public final class VanksNotes extends NotificationListenerService {
     @Override
     public void onNotificationPosted(StatusBarNotification n) {
         posted(n);
+        Shade.changed();
     }
 
     @Override
     public void onNotificationRemoved(StatusBarNotification n) {
         Island.remove("n:" + n.getKey());
+        Shade.changed();
     }
 
     // ── такси и доставка ──────────────────────────────────────────────────

@@ -27,6 +27,8 @@ final class LockView extends View {
     private float lastTapX, lastTapY, downX;
     String msg = "Коснитесь, чтобы войти по отпечатку";
     boolean error;
+    /** Есть датчик отпечатка: без него значка нет, подпись — внизу экрана. */
+    boolean sensor = true;
     int insetTop, insetBottom;
     private final Paint img = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Paint hint = Ui.text(Ui.medium, 14, 0xD9FFFFFF);
@@ -143,6 +145,15 @@ final class LockView extends View {
         c.translate(0, Ui.dpf(120) * fe);
         c.scale(1 - 0.1f * fe, 1 - 0.1f * fe, cx, cy);
         int acc = error ? 0xFFFF6B6B : Ui.accentLight();
+        if (!sensor) {
+            hint.setColor(error ? 0xFFFFA0A0 : 0xD9FFFFFF);
+            c.drawText(msg, w / 2f, h - insetBottom - Ui.dpf(44), hint);
+            c.restoreToCount(fs);
+            // без пульса отпечатка кадр нужен только для часов
+            if (exitAt >= 0) postInvalidateOnAnimation();
+            else if (getVisibility() == VISIBLE && getAlpha() > 0) postInvalidateDelayed(1000);
+            return;
+        }
         fingerEffect(c, cx, cy, now, acc, Prefs.fpEffect);
         drawPress(c, cx, cy, now, acc);
         // палец на датчике — значок чуть вжимается
@@ -260,7 +271,7 @@ final class LockView extends View {
                 downX = e.getX();
                 // коснулись значка отпечатка — он откликается
                 float[] f = finger();
-                if (Math.hypot(e.getX() - f[0], e.getY() - f[1]) < Ui.dpf(48)) fingerDown();
+                if (sensor && Math.hypot(e.getX() - f[0], e.getY() - f[1]) < Ui.dpf(48)) fingerDown();
                 return true;
             }
             case MotionEvent.ACTION_MOVE:

@@ -152,7 +152,7 @@ final class FingerSensor {
     static void auth(Activity a, Callback cb) {
         cancel();
         if (!silent(a)) {
-            Bio.auth(a, "Вход в Vanks", "Приложите палец к датчику", cb::ok, cb::fail);
+            Bio.auth(a, "Вход в Vanks", Bio.hasFingerprintSensor(a) ? "Приложите палец к датчику" : "Посмотрите на экран", cb::ok, cb::fail);
             return;
         }
         FingerprintManager fm = a.getSystemService(FingerprintManager.class);
@@ -206,7 +206,7 @@ final class FingerSensor {
         } catch (RuntimeException e) {
             current = null;
             // тихо не вышло — обычное окно
-            Bio.auth(a, "Вход в Vanks", "Приложите палец к датчику", cb::ok, cb::fail);
+            Bio.auth(a, "Вход в Vanks", Bio.hasFingerprintSensor(a) ? "Приложите палец к датчику" : "Посмотрите на экран", cb::ok, cb::fail);
         }
     }
 

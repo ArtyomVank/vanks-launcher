@@ -60,6 +60,16 @@ final class Updater {
 
     private Updater() {}
 
+    /** Версия Vanks OS (rom/a04 пишет ro.vanks.version), или null — обычный Android. */
+    static String osVersion() {
+        try {
+            String v = (String) Class.forName("android.os.SystemProperties").getMethod("get", String.class).invoke(null, "ro.vanks.version");
+            return v == null || v.isEmpty() ? null : v;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
+        }
+    }
+
     static String current(Context c) {
         try {
             return c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;

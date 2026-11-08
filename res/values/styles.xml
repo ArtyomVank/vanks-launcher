@@ -15,6 +15,12 @@
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowNoTitle">true</item>
     </style>
+    <!-- AOD: непрозрачное чёрное окно — то, что под ним, не рисуется -->
+    <style name="VanksAod" parent="Vanks">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
     <!-- приём ярлыков: окна не видно -->
     <style name="VanksClear" parent="VanksLock">
         <item name="android:windowAnimationStyle">@null</item>

@@ -247,6 +247,39 @@ final class Glyph {
         c.drawPath(path, q);
     }
 
+    /** VPN: щит с замочной скважиной. */
+    static void vpn(Canvas c, float cx, float cy, float s, int color) {
+        shield(c, cx, cy, s, color);
+        Paint q = stroke(color, s);
+        c.drawCircle(cx, cy - s * 0.04f, s * 0.07f, q);
+        c.drawLine(cx, cy + s * 0.03f, cx, cy + s * 0.14f, q);
+    }
+
+    /** Метка на карте: геолокация. */
+    static void pin(Canvas c, float cx, float cy, float s, int color) {
+        Paint q = stroke(color, s);
+        float r0 = s * 0.22f, top = cy - s * 0.12f;
+        path.reset();
+        path.moveTo(cx, cy + s * 0.38f);
+        path.cubicTo(cx - s * 0.12f, cy + s * 0.22f, cx - r0, top + r0 * 0.7f, cx - r0, top);
+        path.arcTo(cx - r0, top - r0, cx + r0, top + r0, 180, 180, false);
+        path.cubicTo(cx + r0, top + r0 * 0.7f, cx + s * 0.12f, cy + s * 0.22f, cx, cy + s * 0.38f);
+        c.drawPath(path, q);
+        c.drawCircle(cx, top, s * 0.07f, q);
+    }
+
+    /** Точка доступа: точка и расходящиеся дуги. */
+    static void hotspot(Canvas c, float cx, float cy, float s, int color) {
+        Paint q = stroke(color, s);
+        c.drawCircle(cx, cy, s * 0.05f, q);
+        for (int i = 1; i <= 2; i++) {
+            float rr = s * (0.14f + i * 0.1f);
+            r.set(cx - rr, cy - rr, cx + rr, cy + rr);
+            c.drawArc(r, 200, 140, false, q);
+            c.drawArc(r, 20, 140, false, q);
+        }
+    }
+
     static void info(Canvas c, float cx, float cy, float s, int color) {
         Paint q = stroke(color, s);
         c.drawCircle(cx, cy, s * 0.34f, q);

@@ -80,6 +80,8 @@ public final class LockActivity extends Activity {
         wall = new WallView(this, own);
         root.addView(wall, new FrameLayout.LayoutParams(-1, -1));
         lock = new LockView(this);
+        // нет датчика отпечатка (A04 и др.) — без значка: лицо или свайп
+        lock.sensor = Bio.hasFingerprintSensor(this);
         lock.listener = this::tapped;
         root.addView(lock, new FrameLayout.LayoutParams(-1, -1));
 
@@ -135,7 +137,8 @@ public final class LockActivity extends Activity {
         screenOn = new BroadcastReceiver() {
             @Override
             public void onReceive(Context c, Intent i) {
-                if (!locked || leaving) return;
+                // экран включил AOD — это ещё не вход; слушать палец, когда AOD уйдёт
+                if (!locked || leaving || AodActivity.active) return;
                 authing = false;
                 grabbed = 0;
                 handTried = false;
@@ -261,7 +264,7 @@ public final class LockActivity extends Activity {
         misses = 0;
         pad.setVisibility(View.GONE);
         lock.error = false;
-        lock.msg = "Приложите палец к датчику";
+        lock.msg = idle();
         lock.animate().cancel();
         lock.setAlpha(1);
         wall.animate().cancel();
@@ -285,6 +288,18 @@ public final class LockActivity extends Activity {
         resumed = was;
     }
 
+    /** Подсказка, пока ждём: палец, лицо или свайп — смотря что есть у телефона. */
+    private String idle() {
+        if (lock.sensor) return "Приложите палец к датчику";
+        return Bio.face(this) ? "Посмотрите на экран" : "Проведите вверх, чтобы войти";
+    }
+
+    /** Подсказка после отмены или ошибки. */
+    private String tapHint() {
+        if (lock.sensor) return "Коснитесь, чтобы войти по отпечатку";
+        return Bio.face(this) ? "Коснитесь, чтобы войти по лицу" : "Проведите вверх, чтобы войти";
+    }
+
     /** Начать слушать палец (без системного окна). */
     private void listen() {
         if (!locked || leaving || authing || !resumed || pad.getVisibility() == View.VISIBLE) return;
@@ -294,8 +309,17 @@ public final class LockActivity extends Activity {
         waitSystem = systemLocked();
         if (waitSystem && !FingerSensor.silent(this)) {
             lock.error = false;
-            lock.msg = "Приложите палец к датчику";
+            lock.msg = idle();
             lock.invalidate();
+            return;
+        }
+        if (!lock.sensor) {
+            // лицо читаем сразу, без касания; нет лица — вход свайпом
+            if (Bio.face(this)) auth();
+            else {
+                lock.msg = idle();
+                lock.invalidate();
+            }
             return;
         }
         if (!FingerSensor.silent(this) && !Bio.available(this)) {
@@ -306,7 +330,7 @@ public final class LockActivity extends Activity {
         }
         if (!FingerSensor.silent(this)) {
             // тихо нельзя — окно отпечатка только по касанию
-            lock.msg = "Коснитесь, чтобы войти по отпечатку";
+            lock.msg = tapHint();
             lock.invalidate();
             return;
         }
@@ -383,7 +407,7 @@ public final class LockActivity extends Activity {
         }
         ui.postDelayed(() -> VanksAccess.uncover(false), 300);
         scan(-1);
-        lock.msg = "Приложите палец к датчику";
+        lock.msg = idle();
         lock.invalidate();
         ui.postDelayed(this::listen, 350);
     }
@@ -419,7 +443,7 @@ public final class LockActivity extends Activity {
         final int gen = ++authGen;
         authing = true;
         lock.error = false;
-        lock.msg = "Приложите палец к датчику";
+        lock.msg = idle();
         lock.invalidate();
         scan(Island.SCANNING);
         FingerSensor.auth(this, new FingerSensor.Callback() {
@@ -473,7 +497,7 @@ public final class LockActivity extends Activity {
                 }
                 scan(-1);
                 lock.error = msg != null;
-                lock.msg = msg != null ? msg : "Коснитесь, чтобы войти по отпечатку";
+                lock.msg = msg != null ? msg : tapHint();
                 lock.invalidate();
             }
         });
@@ -521,7 +545,7 @@ public final class LockActivity extends Activity {
                 @Override
                 public void onDismissCancelled() {
                     VanksAccess.uncover(false);
-                    lock.msg = "Приложите палец к датчику";
+                    lock.msg = idle();
                     lock.invalidate();
                     ui.postDelayed(LockActivity.this::listen, 300);
                 }
@@ -566,6 +590,7 @@ public final class LockActivity extends Activity {
         leaving = true;
         locked = false;
         handed = false;
+        AodActivity.dismiss();
         ui.removeCallbacks(handBack);
         // занавес над системным экраном — прочь: дальше видно наш уход
         VanksAccess.uncover(true);

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Камера: корпус с выступом и объектив со стеклом. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M44,36 L64,36 L68,42 L76,42 C80,42 82,44 82,48 L82,70 C82,74 80,76 76,76 L32,76 C28,76 26,74 26,70 L26,48 C26,44 28,42 32,42 L40,42 Z" />
+    <path android:fillColor="#FF16171D"
+        android:pathData="M54,59 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0" />
+    <path android:fillColor="#FF7C5CFF"
+        android:pathData="M54,59 m-7.5,0 a7.5,7.5 0 1,0 15,0 a7.5,7.5 0 1,0 -15,0" />
+    <path android:fillColor="#99FFFFFF"
+        android:pathData="M51,56 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0" />
+</vector>

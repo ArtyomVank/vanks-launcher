@@ -48,26 +48,32 @@ public final class VanksAccess extends AccessibilityService {
         return on != null;
     }
 
+    /** Включить службу тихо, без окна (нужно WRITE_SECURE_SETTINGS). true — включили. */
+    static boolean enable(android.content.Context c) {
+        if (running()) return true;
+        if (!Nav.canWrite(c)) return false;
+        String me = new android.content.ComponentName(c, VanksAccess.class).flattenToString();
+        try {
+            android.content.ContentResolver cr = c.getContentResolver();
+            String list = android.provider.Settings.Secure.getString(cr, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (list == null || list.isEmpty()) list = me;
+            else if (!list.contains(me)) list = list + ":" + me;
+            android.provider.Settings.Secure.putString(cr, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, list);
+            android.provider.Settings.Secure.putInt(cr, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED, 1);
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     /**
      * Включить службу: с разрешением WRITE_SECURE_SETTINGS (выдаётся один раз
      * через ADB, см. Nav) — сразу, сами; без него — открыть её страницу в
      * настройках Android, где остаётся один переключатель. true — включили сами.
      */
     static boolean turnOn(android.app.Activity a) {
-        if (running()) return true;
+        if (running() || enable(a)) return true;
         String me = new android.content.ComponentName(a, VanksAccess.class).flattenToString();
-        if (Nav.canWrite(a)) {
-            try {
-                android.content.ContentResolver cr = a.getContentResolver();
-                String list = android.provider.Settings.Secure.getString(cr, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-                if (list == null || list.isEmpty()) list = me;
-                else if (!list.contains(me)) list = list + ":" + me;
-                android.provider.Settings.Secure.putString(cr, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, list);
-                android.provider.Settings.Secure.putInt(cr, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED, 1);
-                return true;
-            } catch (RuntimeException ignored) {
-            }
-        }
         // список служб с подсвеченной нашей (страницу одной службы Android
         // открывает только системным приложениям)
         android.os.Bundle args = new android.os.Bundle();
@@ -96,12 +102,33 @@ public final class VanksAccess extends AccessibilityService {
         Ui.init(this);
         wm = getSystemService(WindowManager.class);
         place();
+        // полоса шторки — раньше острова, чтобы остров лежал поверх и нажимался
+        if (Updater.osVersion() != null) Shade.attach(this);
         placeIsland();
         listenSound();
+        systemShade(false);
+    }
+
+    /**
+     * Vanks OS: системная шторка не раскрывается — свайп сверху открывает
+     * панель Vanks (уведомления и пункт управления). Запрет держится, пока
+     * жива служба, и снимается сам, если она упала.
+     */
+    private void systemShade(boolean allow) {
+        if (Updater.osVersion() == null
+                || checkSelfPermission("android.permission.STATUS_BAR") != android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+        try {
+            Object sb = getSystemService("statusbar");
+            // StatusBarManager.DISABLE_EXPAND
+            sb.getClass().getMethod("disable", int.class).invoke(sb, allow ? 0 : 0x00010000);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+        }
     }
 
     @Override
     public boolean onUnbind(android.content.Intent i) {
+        systemShade(true);
+        Shade.detach();
         removeAll();
         dropIsland();
         stopSound();
@@ -116,6 +143,7 @@ public final class VanksAccess extends AccessibilityService {
             try { wm.removeView(fly); } catch (Exception ignored) {}
             fly = null;
         }
+        Shade.detach();
         removeAll();
         dropIsland();
         stopSound();
@@ -142,7 +170,9 @@ public final class VanksAccess extends AccessibilityService {
         if (!Prefs.navGestures || wm == null) return;
         DisplayMetrics dm = getResources().getDisplayMetrics();
         bottom = new Strip(this, Strip.BOTTOM);
-        add(bottom, -1, Ui.dp(30), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0);
+        // тонкая: касания ниже неё и простые нажатия на ней уходят приложению (passThrough)
+        add(bottom, -1, Ui.dp(22), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0);
+        bottom.wake();
         if (Prefs.navBack) {
             // у края боковой панели Vanks — её ручка, полосу «назад» там не ставим
             int top = Math.round(dm.heightPixels * 0.18f), h = Math.round(dm.heightPixels * 0.68f);
@@ -188,6 +218,38 @@ public final class VanksAccess extends AccessibilityService {
     }
 
     /** Окно-полоса на время жеста становится шире: в нём рисуется стрелка «назад». */
+    /**
+     * Нажатие на полосе жестов, которое не стало жестом, — приложению под ней:
+     * полоса на миг перестаёт ловить касания, служба повторяет нажатие (той же
+     * длины — значит, и долгое нажатие) в той же точке.
+     */
+    private void passThrough(Strip s, float x, float y, long dur) {
+        if (s.lp == null || wm == null) return;
+        s.lp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        try { wm.updateViewLayout(s, s.lp); } catch (Exception ignored) { return; }
+        Runnable back = () -> {
+            if (s.lp == null) return;
+            s.lp.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            try { wm.updateViewLayout(s, s.lp); } catch (Exception ignored) {}
+        };
+        // окно сначала должно перестать ловить касания — через кадр-другой
+        ui.postDelayed(() -> {
+            Path p = new Path();
+            p.moveTo(x, y);
+            GestureDescription g = new GestureDescription.Builder()
+                    .addStroke(new GestureDescription.StrokeDescription(p, 0, Math.max(1, Math.min(dur, 2000))))
+                    .build();
+            boolean ok = dispatchGesture(g, new GestureResultCallback() {
+                @Override
+                public void onCompleted(GestureDescription d) { back.run(); }
+
+                @Override
+                public void onCancelled(GestureDescription d) { back.run(); }
+            }, ui);
+            if (!ok) back.run();
+        }, 40);
+    }
+
     private void grow(Strip s, boolean big) {
         if (s.lp == null || s.kind == Strip.BOTTOM) return;
         s.lp.width = big ? Ui.dp(96) : Ui.dp(16);
@@ -332,6 +394,8 @@ public final class VanksAccess extends AccessibilityService {
                     && !go(new android.content.Intent(android.content.Intent.ACTION_VOICE_COMMAND))) googleSearch();
             return;
         }
+        // Vanks OS: «Обвести и найти» от Google — как на Pixel и Galaxy
+        if ("lens".equals(Prefs.pillHold) && circleToSearch(this)) return;
         if (!"lens".equals(Prefs.pillHold) || android.os.Build.VERSION.SDK_INT < 30) {
             googleSearch();
             return;
@@ -360,6 +424,26 @@ public final class VanksAccess extends AccessibilityService {
             });
         } catch (RuntimeException e) {
             googleSearch();
+        }
+    }
+
+    /**
+     * Системное «Обвести и найти» (Android 16+): есть только там, где лаунчер —
+     * системное приложение с ACCESS_CONTEXTUAL_SEARCH, а в прошивке указан
+     * Google (Vanks OS, rom/a04). API скрытое — через отражение.
+     */
+    static boolean circleToSearch(Context c) {
+        if (android.os.Build.VERSION.SDK_INT < 36
+                || c.checkSelfPermission("android.permission.ACCESS_CONTEXTUAL_SEARCH") != android.content.pm.PackageManager.PERMISSION_GRANTED
+                || !c.getPackageManager().hasSystemFeature("android.software.contextualsearch")) return false;
+        try {
+            Object m = c.getSystemService("contextual_search");
+            if (m == null) return false;
+            // ENTRYPOINT_LONG_PRESS_NAV_HANDLE = 1
+            m.getClass().getMethod("startContextualSearch", int.class).invoke(m, 1);
+            return true;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return false;
         }
     }
 
@@ -463,6 +547,30 @@ public final class VanksAccess extends AccessibilityService {
         }
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF r = new RectF();
+        /**
+         * Видна ли полоска (0…1): после касания или смены окна — 4 секунды, потом
+         * гаснет, чтобы не выжечь OLED. На экране блокировки и в AOD её нет.
+         */
+        private float shown = 1f;
+        private android.animation.ValueAnimator fade;
+        private final Runnable dim = () -> fadeTo(0, 600);
+
+        void wake() {
+            removeCallbacks(dim);
+            if (shown < 1f) fadeTo(1, 180);
+            postDelayed(dim, 4000);
+        }
+
+        private void fadeTo(float to, long ms) {
+            if (fade != null) fade.cancel();
+            fade = android.animation.ValueAnimator.ofFloat(shown, to);
+            fade.setDuration(ms);
+            fade.addUpdateListener(a -> {
+                shown = (float) a.getAnimatedValue();
+                invalidate();
+            });
+            fade.start();
+        }
 
         Strip(Context c, int kind) {
             super(c);
@@ -473,13 +581,15 @@ public final class VanksAccess extends AccessibilityService {
         protected void onDraw(Canvas c) {
             if (kind == BOTTOM) {
                 if (!Prefs.navPill && !active) return;
+                if (!active && (shown <= 0.01f || AodActivity.active || LockActivity.locked)) return;
                 // полоска-подсказка; при свайпе тянется вверх и становится ярче
                 float w = Ui.dpf(active ? 140 : 118), h = Ui.dpf(4.5f);
                 float cy = getHeight() - Ui.dpf(8) - Math.min(Ui.dpf(10), pull * 0.06f);
                 r.set(getWidth() / 2f - w / 2, cy - h / 2, getWidth() / 2f + w / 2, cy + h / 2);
                 p.setStyle(Paint.Style.FILL);
-                p.setColor(active ? 0xF2FFFFFF : 0xB3FFFFFF);
-                p.setShadowLayer(Ui.dpf(3), 0, 0, 0x66000000);
+                float k = active ? 1f : shown;
+                p.setColor(Ui.alpha(active ? 0xF2FFFFFF : 0xB3FFFFFF, (active ? 0.95f : 0.7f) * k));
+                p.setShadowLayer(Ui.dpf(3), 0, 0, Ui.alpha(0x66000000, 0.4f * k));
                 c.drawRoundRect(r, h / 2, h / 2, p);
                 return;
             }
@@ -534,6 +644,7 @@ public final class VanksAccess extends AccessibilityService {
                         prepareShot();
                     }
                     grow(this, true);
+                    if (kind == BOTTOM) wake();
                     invalidate();
                     return true;
                 case MotionEvent.ACTION_MOVE: {
@@ -598,6 +709,10 @@ public final class VanksAccess extends AccessibilityService {
                     } else if (up && kind != BOTTOM && pull > Ui.dpf(e.getActionMasked() == MotionEvent.ACTION_UP ? 56 : 14)) {
                         Feel.buzz(this, Feel.CLICK);
                         performGlobalAction(GLOBAL_ACTION_BACK);
+                    } else if (e.getActionMasked() == MotionEvent.ACTION_UP && pull < Ui.dpf(8)
+                            && Math.abs(e.getRawX() - x0) < Ui.dpf(14)) {
+                        // не жест, а нажатие (клавиатура, кнопки внизу приложения) — отдать приложению
+                        passThrough(this, e.getRawX(), e.getRawY(), now - downAt);
                     }
                     active = false;
                     held = false;
@@ -719,6 +834,8 @@ public final class VanksAccess extends AccessibilityService {
             // клавиатура и системная шторка «передним» приложением не считаются
             if (!p.equals("com.android.systemui") && !p.contains("inputmethod") && !p.contains(".ime")) {
                 front = p;
+                // новое окно — полоска снова видна на несколько секунд
+                if (bottom != null) bottom.wake();
                 voiceCheck();
                 // «Недавние»: вперёд вышло приложение — первым в список, и снять окно, когда оно встанет
                 if (!p.equals(getPackageName()) && !HOMES.contains(p)) {

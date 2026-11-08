@@ -190,6 +190,19 @@ public final class EdgeService extends Service {
         }
 
         @Override
+        protected void onLayout(boolean changed, int l, int t, int r, int b) {
+            super.onLayout(changed, l, t, r, b);
+            // свайп от края здесь — наш: системный жест «назад» ручку не забирает
+            if (Build.VERSION.SDK_INT >= 29)
+                setSystemGestureExclusionRects(java.util.Collections.singletonList(new android.graphics.Rect(0, 0, r - l, b - t)));
+        }
+
+        /** Насколько палец ушёл от края внутрь экрана. */
+        private float inward(MotionEvent e) {
+            return Prefs.edgeLeft ? e.getRawX() - x0 : x0 - e.getRawX();
+        }
+
+        @Override
         public boolean onTouchEvent(MotionEvent e) {
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
@@ -198,9 +211,25 @@ public final class EdgeService extends Service {
                     fired = false;
                     ui.postDelayed(longPress, 380);
                     return true;
-                case MotionEvent.ACTION_MOVE:
-                    // палец пошёл — это не удержание (свайп «назад» забрала система)
-                    if (!fired && Math.hypot(e.getRawX() - x0, e.getRawY() - y0) > slop) ui.removeCallbacks(longPress);
+                case MotionEvent.ACTION_MOVE: {
+                    if (fired) return true;
+                    float in = inward(e), dy = Math.abs(e.getRawY() - y0);
+                    // свайп от края внутрь — открыть панель
+                    if (in > slop * 1.5f && in > dy) {
+                        ui.removeCallbacks(longPress);
+                        fired = true;
+                        Feel.buzz(this, Feel.CLICK);
+                        openPanel();
+                    } else if (Math.hypot(e.getRawX() - x0, dy) > slop) ui.removeCallbacks(longPress);
+                    return true;
+                }
+                case MotionEvent.ACTION_CANCEL:
+                    ui.removeCallbacks(longPress);
+                    // систему потянуло на свой жест посреди свайпа внутрь — свайп всё равно наш
+                    if (!fired && inward(e) > slop * 0.5f) {
+                        fired = true;
+                        openPanel();
+                    }
                     return true;
                 default:
                     ui.removeCallbacks(longPress);

@@ -40,6 +40,10 @@ final class Apps {
         int category = -1;  // ApplicationInfo.CATEGORY_*: для названия новой папки
     }
 
+    /** Приложения AOSP, которые в Vanks OS заменяют свои. */
+    private static final java.util.Set<String> OS_HIDDEN = new java.util.HashSet<>(java.util.Arrays.asList(
+            "com.android.settings", "com.android.camera2"));
+
     static final ArrayList<App> all = new ArrayList<>();
     static final HashMap<String, App> byKey = new HashMap<>();
     static int iconPx;
@@ -50,10 +54,13 @@ final class Apps {
         Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
         List<ResolveInfo> list = pm.queryIntentActivities(i, 0);
         ArrayList<App> out = new ArrayList<>();
+        boolean os = Updater.osVersion() != null;
         for (ResolveInfo ri : list) {
             if (ri.activityInfo == null) continue;
             // себя не показываем, а «Настройки» — показываем
             if (ri.activityInfo.name.equals(Home.class.getName())) continue;
+            // в Vanks OS одни «Настройки» и одна «Камера» — Vanks; настройки Android открываются из них
+            if (os && OS_HIDDEN.contains(ri.activityInfo.packageName)) continue;
             App a = new App();
             a.cn = new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name);
             a.key = a.cn.flattenToShortString();

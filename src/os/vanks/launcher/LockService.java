@@ -26,10 +26,19 @@ public final class LockService extends Service {
     private static final int NOTE = 8;
     private BroadcastReceiver off;
 
+    /**
+     * Можно ли открывать окна из фона: «Поверх других приложений» или, в
+     * Vanks OS, системное разрешение START_ACTIVITIES_FROM_BACKGROUND.
+     */
+    static boolean canOpen(Context c) {
+        return Settings.canDrawOverlays(c)
+                || c.checkSelfPermission("android.permission.START_ACTIVITIES_FROM_BACKGROUND") == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
     /** Включить или выключить по настройке. */
     static void sync(Context c) {
         Intent i = new Intent(c, LockService.class);
-        boolean on = Prefs.lockMain && Settings.canDrawOverlays(c);
+        boolean on = (Prefs.lockMain || AodActivity.enabled()) && canOpen(c);
         try {
             if (on) {
                 if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i); else c.startService(i);
@@ -56,7 +65,12 @@ public final class LockService extends Service {
             @Override
             public void onReceive(Context c, Intent i) {
                 Prefs.load(c);
+                // погас при горящем AOD — его дело (уйти или включить экран)
+                if (AodActivity.screenOff(c)) return;
                 if (Prefs.lockMain) LockActivity.show(c);
+                // AOD поверх экрана блокировки: открыть чуть позже, чтобы встал сверху
+                if (AodActivity.enabled() && AodActivity.worth(c))
+                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> AodActivity.show(c, false), Prefs.lockMain ? 250 : 0);
             }
         };
         registerReceiver(off, new IntentFilter(Intent.ACTION_SCREEN_OFF));
@@ -74,7 +88,7 @@ public final class LockService extends Service {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, "lock") : new Notification.Builder(this);
         Notification n = b.setSmallIcon(R.drawable.ic_lock)
-                .setContentTitle("Экран блокировки Vanks")
+                .setContentTitle(Prefs.lockMain ? "Экран блокировки Vanks" : "Всегда на экране")
                 .setContentText("Включится, когда погаснет экран")
                 .setContentIntent(pi)
                 .setOngoing(true)
@@ -86,7 +100,7 @@ public final class LockService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int id) {
         Prefs.load(this);
-        if (!Prefs.lockMain || !Settings.canDrawOverlays(this)) {
+        if (!(Prefs.lockMain || AodActivity.enabled()) || !canOpen(this)) {
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -107,10 +121,18 @@ public final class LockService extends Service {
         @Override
         public void onReceive(Context c, Intent i) {
             Prefs.load(c);
-            // после включения телефон уже открыт системным замком — свой экран
-            // покажется при следующем выключении экрана
             sync(c);
             EdgeService.sync(c);
+            if (Updater.osVersion() != null) {
+                // Vanks OS: системного замка нет — свой экран сразу после включения,
+                // и жесты (системной панели навигации тоже нет)
+                if (Prefs.navGestures) VanksAccess.enable(c);
+                // уведомления — в шторке Vanks (системной в Vanks OS нет)
+                VanksNotes.enable(c);
+                if (Prefs.lockMain && canOpen(c)) LockActivity.show(c);
+            }
+            // на обычном телефоне после включения он уже открыт системным
+            // замком — свой экран покажется при следующем выключении экрана
         }
     }
 }

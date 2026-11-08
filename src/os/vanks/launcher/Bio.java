@@ -35,11 +35,20 @@ final class Bio {
         return c.getPackageManager().hasSystemFeature(PackageManager.FEATURE_FINGERPRINT);
     }
 
+    /** Лицо (или другая биометрия без датчика отпечатка) записано и работает. */
+    static boolean face(Context c) {
+        if (Build.VERSION.SDK_INT < 30 || hasFingerprintSensor(c)) return false;
+        BiometricManager bm = c.getSystemService(BiometricManager.class);
+        return bm != null && bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS;
+    }
+
     /** ok — вошли; fail — отмена или ошибка (сообщение, может быть null). */
     static void auth(Activity a, String title, String subtitle, Runnable ok, Consumer<String> fail) {
         if (current != null) current.cancel();
         BiometricPrompt.Builder b = new BiometricPrompt.Builder(a).setTitle(title);
         if (subtitle != null) b.setSubtitle(subtitle);
+        // лицо узнано — сразу вход, без кнопки «Подтвердить»
+        if (Build.VERSION.SDK_INT >= 29) b.setConfirmationRequired(false);
         if (Build.VERSION.SDK_INT >= 30) {
             b.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK
                     | BiometricManager.Authenticators.DEVICE_CREDENTIAL);

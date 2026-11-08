@@ -2793,8 +2793,8 @@ public final class SettingsActivity extends Activity {
                         + "Если Android заперт PIN-кодом, открыть его сам экран Vanks не может — это делает Android: "
                         + "лицом или пальцем под картинкой экрана Vanks (раздел «Лицо») или PIN-кодом, который набирает служба (раздел «Пароль»).");
         LinearLayout mr = toggleRow(INDIGO, (c, x, y, s, cl) -> Glyph.lock(c, x, y, s, cl, false), "Сделать основным", null,
-                Prefs.lockMain && Settings.canDrawOverlays(this), v -> {
-            if (v && !Settings.canDrawOverlays(this)) {
+                Prefs.lockMain && LockService.canOpen(this), v -> {
+            if (v && !LockService.canOpen(this)) {
                 toast("Разрешите Vanks «Поверх других приложений», потом включите снова");
                 open(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
                 setToggle(lockMainRef, false);
@@ -2815,20 +2815,46 @@ public final class SettingsActivity extends Activity {
             LockActivity.show(this);
         }));
 
-        float[] sensor = FingerSensor.locate(this);
-        Group pos = group(col, "Где значок отпечатка", sensor != null
-                ? "Телефон сообщил, где под экраном датчик, — значок встаёт прямо над ним."
-                : "Телефон не сообщил, где датчик. Выключите «Над датчиком» и поставьте значок ползунком туда, куда прикладываете палец.");
-        add(pos, toggleRow(TEAL, (c, x, y, s, cl) -> Glyph.fingerprint(c, x, y, s, cl, 1f), "Над датчиком (сам)",
-                sensor != null ? "Датчик найден" : "Датчик не найден", Prefs.fpAuto, v -> {
-            Prefs.fpAuto = v;
+        // «Всегда на экране»: время, дата и значки, когда экран погас
+        Group ad = group(col, "Всегда на экране",
+                "Когда гаснет экран, на чёрном видны часы, дата, заряд и значки уведомлений. Яркость и частота экрана самые низкие, "
+                        + "кадр меняется раз в минуту и чуть сдвигается, чтобы не выгорал экран. В кармане, во время звонка, "
+                        + "в экономии энергии и на последних 10 % заряда не горит. «10 секунд» — потом экран гаснет совсем "
+                        + "(нужна служба «Vanks: жесты и вход»), касание — ещё 10 секунд. Двойное касание или свайп вверх — экран блокировки.");
+        add(ad, segments(AodActivity.MODE_NAMES, Math.max(0, Arrays.asList(AodActivity.MODES).indexOf(Prefs.aodMode)), i -> {
+            if (i > 0 && !LockService.canOpen(this)) {
+                toast("Разрешите Vanks «Поверх других приложений», потом выберите снова");
+                open(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
+                return;
+            }
+            Prefs.aodMode = AodActivity.MODES[i];
+            save();
+            LockService.sync(this);
+            if (i == 1 && !VanksAccess.running() && VanksAccess.turnOn(this)) toast("Служба «Vanks: жесты и вход» включена");
+        }));
+        add(ad, segments(AodActivity.STYLE_NAMES, Math.max(0, Arrays.asList(AodActivity.STYLES).indexOf(Prefs.aodStyle)), i -> {
+            Prefs.aodStyle = AodActivity.STYLES[i];
             save();
         }));
-        int dh = getResources().getDisplayMetrics().heightPixels;
-        int cur = Prefs.fpY > 0 ? Math.round(Prefs.fpY * 100) : Math.round(100f * (Ui.dpf(118) + Ui.dpf(24)) / Math.max(1, dh));
-        add(pos, slider("Высота значка вручную", 5, 45, cur, v -> {
-            Prefs.fpY = v / 100f;
-        }, this::save));
+        add(ad, row(INDIGO, Glyph::phone, "Посмотреть", "Касание — закрыть", null, () -> AodActivity.show(this, true)));
+
+        // значок отпечатка — только у телефонов с датчиком
+        if (Bio.hasFingerprintSensor(this)) {
+            float[] sensor = FingerSensor.locate(this);
+            Group pos = group(col, "Где значок отпечатка", sensor != null
+                    ? "Телефон сообщил, где под экраном датчик, — значок встаёт прямо над ним."
+                    : "Телефон не сообщил, где датчик. Выключите «Над датчиком» и поставьте значок ползунком туда, куда прикладываете палец.");
+            add(pos, toggleRow(TEAL, (c, x, y, s, cl) -> Glyph.fingerprint(c, x, y, s, cl, 1f), "Над датчиком (сам)",
+                    sensor != null ? "Датчик найден" : "Датчик не найден", Prefs.fpAuto, v -> {
+                Prefs.fpAuto = v;
+                save();
+            }));
+            int dh = getResources().getDisplayMetrics().heightPixels;
+            int cur = Prefs.fpY > 0 ? Math.round(Prefs.fpY * 100) : Math.round(100f * (Ui.dpf(118) + Ui.dpf(24)) / Math.max(1, dh));
+            add(pos, slider("Высота значка вручную", 5, 45, cur, v -> {
+                Prefs.fpY = v / 100f;
+            }, this::save));
+        }
 
         // пароль: для других людей и чтобы система не спрашивала второй раз
         boolean hasPin = Secret.has(this), svc = VanksAccess.running();
@@ -2900,10 +2926,23 @@ public final class SettingsActivity extends Activity {
         Group g = group(col, null, "Проверочный лаунчер концепта Vanks OS Mobile.");
         String ver = Updater.current(this);
         add(g, row(0, null, "Название", null, "Vanks Launcher", null));
+        String os = Updater.osVersion();
+        if (os != null) add(g, row(0, null, "Система", null, "Vanks OS Mobile " + os, null));
         add(g, row(0, null, "Версия", null, ver, null));
         add(g, row(0, null, "Телефон", null, Build.MANUFACTURER + " " + Build.MODEL, null));
         add(g, row(0, null, "Android", null, Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")", null));
         add(g, row(0, null, "Приложений", null, String.valueOf(Apps.all.size()), null));
+        if (os != null) {
+            Group s = group(col, null, "Язык, интернет, аккаунт, оформление, обои, защита — по шагам, как при первом включении.");
+            add(s, row(INDIGO, Glyph::sliders, "Начальная настройка", null, null, () -> {
+                Prefs.setupDone = false;
+                save();
+                // под мастером — стол: на «Начать» он открывается из-под тающего фона
+                startActivities(new Intent[]{
+                        new Intent(this, Home.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        new Intent(this, SetupActivity.class)});
+            }));
+        }
         Group d = group(col, null, "Чтобы кнопка «домой» открывала Vanks, выберите его лаунчером по умолчанию.");
         add(d, row(GREY, Glyph::phone, "Лаунчер по умолчанию", null, null, () -> open(Settings.ACTION_HOME_SETTINGS)));
         add(d, row(GREY, Glyph::info, "О приложении в Android", null, null, () -> open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
