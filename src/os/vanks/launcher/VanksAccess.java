@@ -343,6 +343,28 @@ public final class VanksAccess extends AccessibilityService {
         private long lastT;
         private long lastMove, downAt;
         private boolean active;
+        // «Недавние»: палец задержали выше 110 dp — запомнили сразу (щелчок),
+        // а не по последнему движению: при отрыве Android почти всегда шлёт
+        // ещё одно короткое движение, и жест через раз становился «Домой»
+        private boolean held;
+        private float holdY;
+        private final Runnable holdCheck = this::holdNow;
+
+        private void holdNow() {
+            if (active && kind == BOTTOM && !held && pull > Ui.dpf(110)) {
+                held = true;
+                Feel.buzz(this, Feel.TICK);
+            }
+        }
+
+        /** Палец сдвинулся: заново ждать задержки; ушёл далеко — «Недавние» отменить. */
+        private void trackHold(float rawY) {
+            if (Math.abs(rawY - holdY) <= Ui.dpf(held ? 36 : 10)) return;
+            holdY = rawY;
+            held = false;
+            removeCallbacks(holdCheck);
+            postDelayed(holdCheck, 200);
+        }
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF r = new RectF();
 
@@ -399,6 +421,9 @@ public final class VanksAccess extends AccessibilityService {
                     downAt = lastMove = SystemClock.uptimeMillis();
                     pull = 0;
                     active = true;
+                    held = false;
+                    holdY = e.getRawY();
+                    removeCallbacks(holdCheck);
                     if (kind == BOTTOM) {
                         y0 = e.getRawY();
                         vx = vy = 0;
@@ -420,6 +445,7 @@ public final class VanksAccess extends AccessibilityService {
                     }
                     boolean was = pull > Ui.dpf(56);
                     pull = Math.max(0, d);
+                    if (kind == BOTTOM) trackHold(e.getRawY());
                     if (kind == BOTTOM) {
                         long t = SystemClock.uptimeMillis();
                         if (t > lastT) {
@@ -447,14 +473,14 @@ public final class VanksAccess extends AccessibilityService {
                     // Палец уже шёл вверх или внутрь — значит, жест был: выполняем сами.
                     if (!up && pull > Ui.dpf(kind == BOTTOM ? 10 : 14) && now - downAt < 1500) up = true;
                     if (kind == BOTTOM && fly != null) {
-                        boolean held = pull > Ui.dpf(110) && now - lastMove > 220;
+                        boolean held = this.held && pull > Ui.dpf(90);
                         // CANCEL — систему потянуло на свой жест: значит, домой
                         boolean cancel = e.getActionMasked() == MotionEvent.ACTION_CANCEL;
                         endFly(held, cancel || pull > Ui.dpf(60) || vy < -Ui.dpf(500), vx, vy);
                         dropShot();
                     } else if (up && kind == BOTTOM && pull > Ui.dpf(e.getActionMasked() == MotionEvent.ACTION_UP ? 36 : 10)) {
                         // задержали палец выше 110 dp — «Недавние», иначе «Домой»
-                        boolean held = pull > Ui.dpf(110) && now - lastMove > 220;
+                        boolean held = this.held && pull > Ui.dpf(90);
                         Feel.buzz(this, Feel.CLICK);
                         if (held && Prefs.ownRecents) RecentsActivity.open(VanksAccess.this, false);
                         else performGlobalAction(held ? GLOBAL_ACTION_RECENTS : GLOBAL_ACTION_HOME);
@@ -464,6 +490,8 @@ public final class VanksAccess extends AccessibilityService {
                         performGlobalAction(GLOBAL_ACTION_BACK);
                     }
                     active = false;
+                    held = false;
+                    removeCallbacks(holdCheck);
                     pull = 0;
                     grow(this, false);
                     invalidate();

@@ -455,7 +455,7 @@ public final class SettingsActivity extends Activity {
         LinearLayout tx = new LinearLayout(this);
         tx.setOrientation(LinearLayout.VERTICAL);
         tx.addView(Views.label(this, "Vanks", 21, Ui.medium, 0xFFFFFFFF));
-        tx.addView(Views.label(this, "Лаунчер, вход по отпечатку, оформление", 13, Ui.regular, SUB));
+        tx.addView(Views.label(this, "Vanks OS Mobile " + Updater.current(this) + (Updater.known != null ? " · доступна " + Updater.known.version : ""), 13, Ui.regular, SUB));
         card.addView(tx, new LinearLayout.LayoutParams(0, -2, 1));
         card.addView(Views.drawn(this, (c, w, h) -> Glyph.chevronRight(c, w / 2, h / 2, Ui.dpf(20), 0x66EBEBF5)),
                 new LinearLayout.LayoutParams(Ui.dp(14), Ui.dp(24)));
@@ -2882,12 +2882,9 @@ public final class SettingsActivity extends Activity {
     private View aboutPage() {
         View[] out = new View[1];
         LinearLayout col = page("О лаунчере", "Настройки", out);
+        col.addView(versionCard(), heroLp());
         Group g = group(col, null, "Проверочный лаунчер концепта Vanks OS Mobile.");
-        String ver = "0.2";
-        try {
-            ver = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-        } catch (Exception ignored) {
-        }
+        String ver = Updater.current(this);
         add(g, row(0, null, "Название", null, "Vanks Launcher", null));
         add(g, row(0, null, "Версия", null, ver, null));
         add(g, row(0, null, "Телефон", null, Build.MANUFACTURER + " " + Build.MODEL, null));
@@ -2900,11 +2897,89 @@ public final class SettingsActivity extends Activity {
         return out[0];
     }
 
+    private LinearLayout.LayoutParams heroLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, Ui.dp(212));
+        lp.leftMargin = lp.rightMargin = Ui.dp(16);
+        lp.topMargin = Ui.dp(8);
+        return lp;
+    }
+
+    /**
+     * Карточка оболочки, как в «Об устройстве» ColorOS: крупное название,
+     * версия и состояние. Нажатие — искать новую версию; нашлась — второе
+     * нажатие качает и ставит (подробности — «Обновление»).
+     */
+    private View versionCard() {
+        FrameLayout card = new FrameLayout(this);
+        String cur = Updater.current(this);
+        card.addView(Views.drawn(this, (c, w, h) -> {
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            float r = Ui.dpf(26);
+            p.setShader(new android.graphics.LinearGradient(0, 0, w, h,
+                    new int[]{Ui.accentLight(), Ui.accentDark(), 0xFF0B0B12}, new float[]{0f, 0.55f, 1f},
+                    android.graphics.Shader.TileMode.CLAMP));
+            c.drawRoundRect(0, 0, w, h, r, r, p);
+            // мягкие круги света, как на обложке версии
+            p.setShader(new android.graphics.RadialGradient(w * 0.82f, h * 0.18f, w * 0.55f, 0x55FFFFFF, 0x00FFFFFF,
+                    android.graphics.Shader.TileMode.CLAMP));
+            c.drawRoundRect(0, 0, w, h, r, r, p);
+            p.setShader(new android.graphics.RadialGradient(w * 0.1f, h * 1.05f, w * 0.6f, 0x33000000, 0x00000000,
+                    android.graphics.Shader.TileMode.CLAMP));
+            c.drawRoundRect(0, 0, w, h, r, r, p);
+        }), new FrameLayout.LayoutParams(-1, -1));
+        LinearLayout tx = new LinearLayout(this);
+        tx.setOrientation(LinearLayout.VERTICAL);
+        tx.setPadding(Ui.dp(22), Ui.dp(22), Ui.dp(22), Ui.dp(18));
+        tx.addView(Views.label(this, "Vanks", 46, Ui.bold, 0xFFFFFFFF));
+        tx.addView(Views.label(this, "Vanks OS Mobile " + cur, 17, Ui.medium, 0xE6FFFFFF));
+        View gap = new View(this);
+        tx.addView(gap, new LinearLayout.LayoutParams(1, 0, 1));
+        TextView state = Views.label(this, "", 14, Ui.regular, 0xCCFFFFFF);
+        tx.addView(state);
+        card.addView(tx, new FrameLayout.LayoutParams(-1, -1));
+        boolean[] busy = new boolean[1];
+        Runnable show = () -> {
+            Updater.Release r = Updater.known;
+            state.setText(r != null ? "Доступна " + r.version + " — нажмите, чтобы установить" : "Нажмите, чтобы проверить обновления");
+        };
+        show.run();
+        card.setClipToOutline(true);
+        card.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(View v, android.graphics.Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(26));
+            }
+        });
+        card.setForeground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), null, new ColorDrawable(0xFFFFFFFF)));
+        card.setOnClickListener(v -> {
+            if (busy[0]) return;
+            Updater.Release r = Updater.known;
+            busy[0] = true;
+            if (r == null) {
+                state.setText("Ищу новую версию…");
+                Updater.check(this, (rr, err) -> {
+                    busy[0] = false;
+                    if (err != null) state.setText(err);
+                    else if (rr == null) state.setText("Установлена последняя версия");
+                    else show.run();
+                });
+                return;
+            }
+            state.setText("Скачиваю " + r.version + "…");
+            Updater.install(this, r, f -> state.setText("Скачиваю " + r.version + " — " + Math.round(f * 100) + " %"), (rr, err) -> {
+                busy[0] = false;
+                state.setText(err != null ? err : "Ставлю " + r.version + "…");
+            });
+        });
+        return card;
+    }
+
     // ── обновление по воздуху ─────────────────────────────────────────────
 
     private View updatePage() {
         View[] out = new View[1];
         LinearLayout col = page("Обновление", "Настройки", out);
+        col.addView(versionCard(), heroLp());
         String cur = Updater.current(this);
         Group g = group(col, null, "Новые версии выходят на GitHub (" + Updater.REPO + "). Vanks скачивает APK, сверяет контрольную сумму "
                 + "и ставит его через установщик Android; Android проверяет, что он подписан тем же ключом. "

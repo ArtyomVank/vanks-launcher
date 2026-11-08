@@ -686,10 +686,7 @@ final class Desk extends FrameLayout {
         }
 
         RectF screenRect(RectF local) {
-            int[] loc = new int[2];
-            getLocationInWindow(loc);
-            float sc = Desk.this.getScaleX();
-            return new RectF(loc[0] + local.left * sc, loc[1] + local.top * sc, loc[0] + local.right * sc, loc[1] + local.bottom * sc);
+            return Ui.toWindow(this, local);
         }
 
         /** Для снимка при перетаскивании: без нажатия и рамок правки. */

@@ -104,6 +104,31 @@ final class Ui {
     static int dp(float v) { return Math.round(v * density); }
     static float dpf(float v) { return v * density; }
 
+    /**
+     * Прямоугольник внутри вида — в координаты окна, со всеми масштабами и
+     * сдвигами вида и его родителей (ужатый ряд дока, стол в глубине).
+     * getLocationInWindow сдвигает только начало, размер оставался прежним —
+     * окно приложения вырастало и возвращалось мимо значка.
+     */
+    static android.graphics.RectF toWindow(android.view.View v, android.graphics.RectF local) {
+        android.graphics.RectF out = new android.graphics.RectF(local);
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            android.graphics.Matrix m = new android.graphics.Matrix();
+            v.transformMatrixToGlobal(m);
+            m.mapRect(out);
+            return out;
+        }
+        int[] loc = new int[2];
+        v.getLocationInWindow(loc);
+        float sx = v.getScaleX(), sy = v.getScaleY();
+        for (android.view.ViewParent p = v.getParent(); p instanceof android.view.View; p = p.getParent()) {
+            sx *= ((android.view.View) p).getScaleX();
+            sy *= ((android.view.View) p).getScaleY();
+        }
+        out.set(loc[0] + local.left * sx, loc[1] + local.top * sy, loc[0] + local.right * sx, loc[1] + local.bottom * sy);
+        return out;
+    }
+
     static int mix(int a, int b, float t) {
         t = Math.max(0, Math.min(1, t));
         return Color.argb(

@@ -135,10 +135,8 @@ final class AppGrid extends View {
     private RectF screenRect(int i) {
         RectF out = new RectF();
         rectFor(i, out);
-        int[] loc = new int[2];
-        getLocationInWindow(loc);
-        out.offset(loc[0], loc[1]);
-        return out;
+        // с масштабом: ряд дока ужимается, когда значки не влезают
+        return Ui.toWindow(this, out);
     }
 
     private int hit(float x, float y) {

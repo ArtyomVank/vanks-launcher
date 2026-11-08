@@ -102,7 +102,14 @@ public final class RecentsActivity extends Activity {
     protected void onPause() {
         super.onPause();
         if (shown == this) shown = null;
-        // ушли (открыли приложение, «Домой») — недавние не висят под ним
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        // ушли (открыли приложение, «Домой») — недавние не висят под ним. Не в
+        // onPause: короткая пауза сразу после открытия (стол ещё приходит после
+        // «Домой», шторка) закрывала их, и жест срабатывал через раз
         if (!isFinishing()) finish();
     }
 
