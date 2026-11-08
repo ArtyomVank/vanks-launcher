@@ -184,6 +184,7 @@ public final class Home extends Activity {
         Hz.apply(this);
         Ui.init(this);
         Feel.init(this);
+        CameraActivity.sync(this);
         Apps.load(this);
         if (Prefs.firstRun || (Prefs.home.isEmpty() && Prefs.dock.isEmpty())) Apps.pickDefaults(this);
         Apps.renderIcons(this, iconPx());

@@ -29,6 +29,12 @@ final class Ui {
     private static final Matrix tmp = new Matrix();
 
     static void init(Context c) {
+        base(c);
+        loadWall(c);
+    }
+
+    /** Без обоев: для окон, которым они не нужны (камера в своём процессе). */
+    static void base(Context c) {
         density = c.getResources().getDisplayMetrics().density;
         LockFace.app = c.getApplicationContext();
         light = Typeface.create(Typeface.SANS_SERIF, 300, false);
@@ -36,7 +42,6 @@ final class Ui {
         medium = Typeface.create(Typeface.SANS_SERIF, 500, false);
         bold = Typeface.create(Typeface.SANS_SERIF, 650, false);
         rimPaint.setStrokeWidth(dp(1));
-        loadWall(c);
     }
 
     /** Загрузить обои из настроек, если сменились. true — сменились. */
@@ -45,9 +50,10 @@ final class Ui {
         if (w.id.equals(wallId) && wall != null) return false;
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inScaled = false;
-        wall = BitmapFactory.decodeResource(c.getResources(), w.still, o);
+        float k = fitScale(c, w.still);
+        wall = decode(c, w.still, k);
         wallBlur = BitmapFactory.decodeResource(c.getResources(), w.blur, o);
-        wallFg = w.fg != 0 ? BitmapFactory.decodeResource(c.getResources(), w.fg, o) : null;
+        wallFg = w.fg != 0 ? decode(c, w.fg, k) : null;
         blurShader = new BitmapShader(wallBlur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
         glassPaint.setShader(blurShader);
         glassPaint.setFilterBitmap(true);
@@ -67,11 +73,49 @@ final class Ui {
         if (w.id.equals(lockId) && lockWall != null) return false;
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inScaled = false;
-        lockWall = BitmapFactory.decodeResource(c.getResources(), w.still, o);
+        float k = fitScale(c, w.still);
+        lockWall = decode(c, w.still, k);
         lockBlur = BitmapFactory.decodeResource(c.getResources(), w.blur, o);
-        lockFg = w.fg != 0 ? BitmapFactory.decodeResource(c.getResources(), w.fg, o) : null;
+        lockFg = w.fg != 0 ? decode(c, w.fg, k) : null;
         lockId = w.id;
         return true;
+    }
+
+    /**
+     * Во сколько уменьшить картинку обоев, чтобы она лишь накрывала экран (с
+     * запасом на приближение при разблокировке). Обои 1080×2364 на экране
+     * 720×1600 — вдвое больше памяти и работы видеочипу без всякой пользы.
+     */
+    static float fitScale(Context c, int res) {
+        BitmapFactory.Options b = new BitmapFactory.Options();
+        b.inJustDecodeBounds = true;
+        b.inScaled = false;
+        BitmapFactory.decodeResource(c.getResources(), res, b);
+        if (b.outWidth <= 0 || b.outHeight <= 0) return 1;
+        int sw, sh;
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            android.graphics.Rect r = c.getSystemService(android.view.WindowManager.class).getMaximumWindowMetrics().getBounds();
+            sw = r.width();
+            sh = r.height();
+        } else {
+            sw = c.getResources().getDisplayMetrics().widthPixels;
+            sh = c.getResources().getDisplayMetrics().heightPixels;
+        }
+        float s = Math.max(Math.min(sw, sh) / (float) b.outWidth, Math.max(sw, sh) / (float) b.outHeight) * 1.1f;
+        return Math.min(1f, s);
+    }
+
+    /** Картинка из ресурсов, уменьшенная в k раз прямо при чтении. */
+    static Bitmap decode(Context c, int res, float k) {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        if (k >= 0.99f) {
+            o.inScaled = false;
+        } else {
+            o.inScaled = true;
+            o.inDensity = 1000;
+            o.inTargetDensity = Math.round(1000 * k);
+        }
+        return BitmapFactory.decodeResource(c.getResources(), res, o);
     }
 
     /** Свои обои на экране блокировки (не те же, что на столе). */
