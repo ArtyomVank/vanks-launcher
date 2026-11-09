@@ -3,12 +3,14 @@ package os.vanks.launcher;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.RectF;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -21,6 +23,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -758,6 +761,202 @@ public final class VanksAccess extends AccessibilityService {
 
     // ── занавес над системным экраном блокировки ──────────────────────────
 
+    // ── выгрузка приложений ───────────────────────────────────────────────
+
+    private final ArrayDeque<String> stops = new ArrayDeque<>();
+    private final Runnable stopTick = this::stopTick;
+    private String stopPkg, stopLabel;
+    private int stopStage, stopDone, stopAll;
+    private long stopFrom, stopUntil;
+    private View stopCover;
+
+    /**
+     * Нажать «Остановить» в сведениях о каждом приложении: другого способа
+     * выгрузить его целиком у обычного приложения нет. Человек видит занавес со
+     * счётчиком, а не прыгающие настройки; нажатие по занавесу прерывает.
+     */
+    static boolean forceStop(List<String> pkgs) {
+        VanksAccess s = on;
+        if (s == null || s.wm == null || pkgs.isEmpty() || s.stopPkg != null) return false;
+        s.ui.post(() -> s.startStops(pkgs));
+        return true;
+    }
+
+    private void startStops(List<String> pkgs) {
+        stops.clear();
+        String settings = settingsPackage();
+        for (String p : pkgs) if (!p.equals(settings)) stops.add(p);
+        stopAll = stops.size();
+        stopDone = 0;
+        showStopCover();
+        ui.postDelayed(this::stopNext, 120);
+    }
+
+    private String settingsPackage() {
+        Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getPackageName(), null));
+        android.content.pm.ResolveInfo r = getPackageManager().resolveActivity(i, 0);
+        return r == null ? "" : r.activityInfo.packageName;
+    }
+
+    private void stopNext() {
+        ui.removeCallbacks(stopTick);
+        stopPkg = stops.poll();
+        if (stopCover != null) stopCover.invalidate();
+        if (stopPkg == null) {
+            stopsEnd();
+            return;
+        }
+        stopStage = 0;
+        stopFrom = SystemClock.uptimeMillis();
+        stopUntil = stopFrom + 2600;
+        try {
+            android.content.pm.PackageManager pm = getPackageManager();
+            stopLabel = pm.getApplicationLabel(pm.getApplicationInfo(stopPkg, 0)).toString();
+            startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", stopPkg, null))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION
+                            | Intent.FLAG_ACTIVITY_NO_HISTORY | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS));
+        } catch (Exception e) {
+            stopNext();
+            return;
+        }
+        ui.postDelayed(stopTick, 160);
+    }
+
+    private void stopTick() {
+        if (stopPkg == null) return;
+        long now = SystemClock.uptimeMillis();
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root != null && stopStage == 0) {
+            ArrayList<AccessibilityNodeInfo> all = nodes(root);
+            AccessibilityNodeInfo b = withText(all, java.util.Collections.singletonList(stopLabel)) == null ? null : stopButton(root, all);
+            // кнопка сперва серая, пока система не ответит, запущено ли приложение
+            if (b != null && b.isEnabled()) {
+                if (b.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    stopStage = 1;
+                    stopUntil = now + 1500;
+                }
+            } else if (b != null && now - stopFrom > 800) {
+                stopDone++;
+                stopNext();
+                return;
+            }
+        } else if (root != null) {
+            List<AccessibilityNodeInfo> ids = root.findAccessibilityNodeInfosByViewId("android:id/button1");
+            AccessibilityNodeInfo ok = !ids.isEmpty() ? ids.get(0)
+                    : withText(nodes(root), java.util.Arrays.asList(getString(android.R.string.ok), "ОК", "OK"));
+            if (ok != null && ok.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                stopDone++;
+                ui.postDelayed(this::stopNext, 140);
+                return;
+            }
+        }
+        if (now > stopUntil) {
+            stopNext();
+            return;
+        }
+        ui.postDelayed(stopTick, 90);
+    }
+
+    /** Кнопка по её же подписи из приложения настроек, иначе — по известным подписям. */
+    private AccessibilityNodeInfo stopButton(AccessibilityNodeInfo root, List<AccessibilityNodeInfo> all) {
+        ArrayList<String> words = new ArrayList<>();
+        CharSequence pkg = root.getPackageName();
+        if (pkg != null) {
+            try {
+                android.content.res.Resources r = getPackageManager().getResourcesForApplication(pkg.toString());
+                int id = r.getIdentifier("force_stop", "string", pkg.toString());
+                if (id != 0) words.add(r.getString(id));
+            } catch (Exception ignored) {
+            }
+        }
+        words.addAll(java.util.Arrays.asList("Принудительно остановить", "Остановить", "Force stop", "Закрыть"));
+        return withText(all, words);
+    }
+
+    /** Все узлы окна обходом: на экранах Compose поиск по тексту ничего не находит. */
+    private static ArrayList<AccessibilityNodeInfo> nodes(AccessibilityNodeInfo root) {
+        ArrayList<AccessibilityNodeInfo> out = new ArrayList<>();
+        out.add(root);
+        for (int i = 0; i < out.size() && out.size() < 800; i++) {
+            AccessibilityNodeInfo n = out.get(i);
+            for (int k = 0; k < n.getChildCount(); k++) {
+                AccessibilityNodeInfo c = n.getChild(k);
+                if (c != null) out.add(c);
+            }
+        }
+        return out;
+    }
+
+    /** Узел с такой подписью (слова по порядку важности) или его нажимаемый родитель. */
+    private static AccessibilityNodeInfo withText(List<AccessibilityNodeInfo> all, List<String> words) {
+        for (String w : words) {
+            for (AccessibilityNodeInfo n : all) {
+                CharSequence t = n.getText();
+                if (t == null || !t.toString().equalsIgnoreCase(w)) continue;
+                AccessibilityNodeInfo c = n;
+                while (c != null && !c.isClickable()) c = c.getParent();
+                return c != null ? c : n;
+            }
+        }
+        return null;
+    }
+
+    private void stopsEnd() {
+        try {
+            startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(getPackageName())
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION));
+        } catch (Exception ignored) {
+        }
+        View v = stopCover;
+        stopCover = null;
+        if (v != null) ui.postDelayed(() -> v.animate().alpha(0).setDuration(180).withEndAction(() -> {
+            try { wm.removeView(v); } catch (Exception ignored) {}
+        }).start(), 260);
+    }
+
+    private void showStopCover() {
+        View v = new View(this) {
+            final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+            final android.graphics.Matrix m = new android.graphics.Matrix();
+
+            @Override
+            protected void onDraw(Canvas c) {
+                int w = getWidth(), h = getHeight();
+                c.drawColor(0xFF070A18);
+                if (Ui.wallBlur != null) c.drawBitmap(Ui.wallBlur, Ui.wallMatrix(Ui.wallBlur, w, h, 1f, m), p);
+                c.drawColor(0x66070A18);
+                p.setColor(0xFFFFFFFF);
+                p.setTextAlign(Paint.Align.CENTER);
+                p.setTypeface(Ui.medium);
+                p.setTextSize(Ui.dpf(20));
+                c.drawText("Закрываю приложения", w / 2f, h / 2f, p);
+                p.setColor(0xB3FFFFFF);
+                p.setTypeface(Ui.regular);
+                p.setTextSize(Ui.dpf(14));
+                c.drawText(Math.min(stopDone + 1, stopAll) + " из " + stopAll + " · нажмите, чтобы прервать", w / 2f, h / 2f + Ui.dpf(28), p);
+            }
+        };
+        v.setOnClickListener(x -> stops.clear());
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(-1, -1,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                PixelFormat.OPAQUE);
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            lp.setFitInsetsTypes(0);
+            lp.setFitInsetsSides(0);
+        }
+        lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        lp.windowAnimations = 0;
+        lp.setTitle("Vanks unload");
+        try {
+            wm.addView(v, lp);
+            stopCover = v;
+        } catch (Exception ignored) {
+        }
+    }
+
     private View cover;
 
     /**
@@ -838,7 +1037,7 @@ public final class VanksAccess extends AccessibilityService {
                 if (bottom != null) bottom.wake();
                 voiceCheck();
                 // «Недавние»: вперёд вышло приложение — первым в список, и снять окно, когда оно встанет
-                if (!p.equals(getPackageName()) && !HOMES.contains(p)) {
+                if (!p.equals(getPackageName()) && !HOMES.contains(p) && stopPkg == null) {
                     Recents.touch(this, p);
                     ui.removeCallbacks(snapFront);
                     ui.postDelayed(snapFront, 900);

@@ -52,7 +52,7 @@ final class Ui {
         o.inScaled = false;
         float k = fitScale(c, w.still);
         wall = decode(c, w.still, k);
-        wallBlur = BitmapFactory.decodeResource(c.getResources(), w.blur, o);
+        wallBlur = Walls.decode(c, w.blur, o);
         wallFg = w.fg != 0 ? decode(c, w.fg, k) : null;
         blurShader = new BitmapShader(wallBlur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
         glassPaint.setShader(blurShader);
@@ -75,7 +75,7 @@ final class Ui {
         o.inScaled = false;
         float k = fitScale(c, w.still);
         lockWall = decode(c, w.still, k);
-        lockBlur = BitmapFactory.decodeResource(c.getResources(), w.blur, o);
+        lockBlur = Walls.decode(c, w.blur, o);
         lockFg = w.fg != 0 ? decode(c, w.fg, k) : null;
         lockId = w.id;
         return true;
@@ -90,7 +90,7 @@ final class Ui {
         BitmapFactory.Options b = new BitmapFactory.Options();
         b.inJustDecodeBounds = true;
         b.inScaled = false;
-        BitmapFactory.decodeResource(c.getResources(), res, b);
+        Walls.decode(c, res, b);
         if (b.outWidth <= 0 || b.outHeight <= 0) return 1;
         int sw, sh;
         if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -115,7 +115,7 @@ final class Ui {
             o.inDensity = 1000;
             o.inTargetDensity = Math.round(1000 * k);
         }
-        return BitmapFactory.decodeResource(c.getResources(), res, o);
+        return Walls.decode(c, res, o);
     }
 
     /** Свои обои на экране блокировки (не те же, что на столе). */
@@ -159,7 +159,7 @@ final class Ui {
                 if (!alpha) o.inPreferredConfig = Bitmap.Config.RGB_565;
                 Bitmap r;
                 try {
-                    r = BitmapFactory.decodeResource(app.getResources(), res, o);
+                    r = Walls.decode(app, res, o);
                 } catch (OutOfMemoryError e) {
                     r = null;
                 }
@@ -287,10 +287,14 @@ final class Ui {
 
     /** Обои «обложкой» на экран w×h; zoom > 1 — чуть ближе, от центра. */
     static Matrix wallMatrix(Bitmap b, int w, int h, float zoom, Matrix out) {
-        float s = Math.max(w / (float) b.getWidth(), h / (float) b.getHeight()) * zoom;
+        return wallMatrix(b.getWidth(), b.getHeight(), w, h, zoom, out);
+    }
+
+    static Matrix wallMatrix(int iw, int ih, int w, int h, float zoom, Matrix out) {
+        float s = Math.max(w / (float) iw, h / (float) ih) * zoom;
         out.reset();
         out.setScale(s, s);
-        out.postTranslate((w - b.getWidth() * s) / 2f, (h - b.getHeight() * s) / 2f);
+        out.postTranslate((w - iw * s) / 2f, (h - ih * s) / 2f);
         return out;
     }
 

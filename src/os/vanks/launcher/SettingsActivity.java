@@ -969,7 +969,7 @@ public final class SettingsActivity extends Activity {
                 Bitmap b = Ui.wallThumb(SettingsActivity.this, w, this);
                 if (b != null) Ui.drawCover(c, b, r, Ui.dpf(12), p, 1f);
                 else Ui.picHolder(c, r, Ui.dpf(12));
-                if (w.kind != Walls.PHOTO) {
+                if (w.kind != Walls.PHOTO || w.effect != Walls.STILL) {
                     // значок «живые»: три точки-волны в углу
                     p.setStyle(Paint.Style.FILL);
                     p.setColor(0x66000000);
@@ -997,7 +997,12 @@ public final class SettingsActivity extends Activity {
                 int colI = (int) ((e.getX() - Ui.dpf(16)) / (cardW() + gap()));
                 int rowI = (int) ((e.getY() - Ui.dpf(6)) / rowH());
                 int i = rowI * COLS + Math.max(0, Math.min(COLS - 1, colI));
-                if (rowI >= 0 && i < walls.size()) applyWall(walls.get(i), picked);
+                if (rowI >= 0 && i < walls.size()) {
+                    Walls.W w = walls.get(i);
+                    // удержание на своих обоях — удалить
+                    if (w.mineId != 0 && e.getEventTime() - e.getDownTime() > 450) removeMine(w);
+                    else applyWall(w, picked);
+                }
             }
             return true;
         }
@@ -1011,6 +1016,8 @@ public final class SettingsActivity extends Activity {
                 : "На этом Android (до 13) живые и супер обои показываются готовым кадром — шейдерам нужен Android 13.", 13, Ui.regular, SUB);
         note.setPadding(Ui.dp(20), 0, Ui.dp(20), Ui.dp(4));
         col.addView(note);
+        wallTop = out[0];
+        addMineRow(col, "Свои обои удаляются удержанием на картинке.");
         ArrayList<WallGrid> grids = new ArrayList<>();
         Runnable picked = () -> {
             for (WallGrid g : grids) g.invalidate();
@@ -1057,10 +1064,11 @@ public final class SettingsActivity extends Activity {
             name.setText(w.title);
             String lockId = Prefs.lockWallpaper.isEmpty() ? Prefs.wallpaper : Prefs.lockWallpaper;
             boolean h = w.id.equals(Prefs.wallpaper), l = w.id.equals(lockId);
-            String kind = w.kind == Walls.SHADER ? "Супер обои" : w.kind == Walls.FLOW ? "Живые обои" : "Фото";
+            String kind = Walls.kindName(w);
             where.setText(kind + (h && l ? " · стоят на обоих экранах" : h ? " · на главном экране" : l ? " · на экране блокировки" : ""));
         };
         stack.changed = info;
+        lockWallTop = out[0];
         col.addView(stack, new LinearLayout.LayoutParams(-1, Ui.dp(440)));
         col.addView(name, new LinearLayout.LayoutParams(-1, -2));
         col.addView(where, new LinearLayout.LayoutParams(-1, -2));
@@ -1096,6 +1104,7 @@ public final class SettingsActivity extends Activity {
         ap.setMargins(Ui.dp(40), Ui.dp(12), Ui.dp(40), Ui.dp(4));
         col.addView(apply, ap);
         info.run();
+        addMineRow(col, null);
 
         // часы
         Group cl = group(col, "Часы", "Все виды часов Delta с компьютера. Нажмите на вид — стопка сверху сразу покажет, как это будет.");
@@ -1215,7 +1224,99 @@ public final class SettingsActivity extends Activity {
         return sl;
     }
 
-    private static final int PICK_FP = 41;
+    private void addMineRow(LinearLayout col, String foot) {
+        Group g = group(col, null, foot != null ? foot : "Фото, видео или GIF из галереи: обычные, анимированные, живые или супер.");
+        add(g, row(PINK, Glyph::image, "Добавить свои обои", null, null, this::pickWall));
+    }
+
+    private void pickWall() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
+        try {
+            startActivityForResult(i, PICK_WALL);
+        } catch (Exception e) {
+            toast("Нет приложения для выбора файлов");
+        }
+    }
+
+    /** Файл выбран: какие это будут обои. */
+    private void askWallEffect(android.net.Uri uri) {
+        String type = getContentResolver().getType(uri);
+        String mime = type == null ? "" : type;
+        if (!mime.startsWith("image/") && !mime.startsWith("video/")) {
+            toast("Нужна картинка, GIF или видео");
+            return;
+        }
+        boolean moving = mime.startsWith("video/") || mime.equals("image/gif");
+        String[] items = {moving ? "Анимированные — идут по кругу" : "Обычные", "Живые — доигрывают при входе и замирают", "Супер — издалека, при входе камера летит к ним"};
+        int[] effects = {moving ? Walls.LOOP : Walls.STILL, Walls.LIVE, Walls.SUPER};
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Какие это обои")
+                .setItems(items, (d, which) -> importWall(uri, mime, effects[which]))
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void importWall(android.net.Uri uri, String mime, int effect) {
+        toast("Добавляю обои…");
+        android.content.Context app = getApplicationContext();
+        new Thread(() -> {
+            Walls.W w = null;
+            String err = "Не удалось добавить обои";
+            try {
+                w = Walls.importWall(app, uri, mime, effect);
+            } catch (Walls.TooBig e) {
+                err = "Файл больше 300 МБ — выберите покороче";
+            } catch (Exception | OutOfMemoryError ignored) {
+            }
+            Walls.W done = w;
+            String msg = err;
+            runOnUiThread(() -> {
+                if (isDestroyed()) return;
+                if (done == null) {
+                    toast(msg);
+                    return;
+                }
+                reopenWallPage();
+                applyWall(done, this::reopenWallPage);
+            });
+        }, "wall-import").start();
+    }
+
+    /** Список обоев изменился: открытые страницы обоев заново, на том же месте стека. */
+    private void reopenWallPage() {
+        for (int i = 0; i < pages.size(); i++) {
+            View old = pages.get(i);
+            if (old != lockWallTop && old != wallTop) continue;
+            View p = old == lockWallTop ? lockWallPage() : wallPage();
+            p.setVisibility(old.getVisibility());
+            stack.removeView(old);
+            pages.set(i, p);
+            stack.addView(p, i, new FrameLayout.LayoutParams(-1, -1));
+        }
+    }
+
+    private void removeMine(Walls.W w) {
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Удалить «" + w.title + "»?")
+                .setPositiveButton("Удалить", (d, x) -> {
+                    if (w.id.equals(Prefs.wallpaper)) Prefs.wallpaper = Walls.PHOTOS[0].id;
+                    if (w.id.equals(Prefs.lockWallpaper)) Prefs.lockWallpaper = "";
+                    save();
+                    Walls.remove(this, w);
+                    Ui.loadWall(this);
+                    Ui.loadLockWall(this);
+                    SysWall.sync(this);
+                    reopenWallPage();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private static final int PICK_FP = 41, PICK_WALL = 42;
+    private View lockWallTop, wallTop;   // открытые страницы обоев
 
     /** Своё фото для отпечатка: из галереи, обрезается в круг. */
     private void pickFingerPhoto() {
@@ -1233,6 +1334,10 @@ public final class SettingsActivity extends Activity {
     @SuppressWarnings("deprecation")
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == PICK_WALL && res == RESULT_OK && data != null && data.getData() != null) {
+            askWallEffect(data.getData());
+            return;
+        }
         if (req != PICK_FP || res != RESULT_OK || data == null || data.getData() == null) return;
         try {
             android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();

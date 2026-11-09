@@ -1,7 +1,6 @@
 package os.vanks.launcher;
 
 import android.app.Activity;
-import android.app.ActivityManager;
 import android.app.ActivityOptions;
 import android.content.Context;
 import android.content.Intent;
@@ -386,17 +385,23 @@ public final class RecentsActivity extends Activity {
                     invalidate();
                 }, (long) (Math.min(k, 6) * 40 * Prefs.k()));
             }
-            for (Item it : items) kill(it.pkg);
+            ArrayList<String> pkgs = new ArrayList<>();
+            for (Item it : items) pkgs.add(it.pkg);
             Recents.clear(RecentsActivity.this);
-            postDelayed(RecentsActivity.this::goHome, (long) (420 * Prefs.k()));
+            postDelayed(() -> {
+                if (Unload.all(RecentsActivity.this, pkgs)) {
+                    // служба выгружает под занавесом и сама вернётся на стол
+                    finish();
+                    overridePendingTransition(0, 0);
+                } else {
+                    goHome();
+                }
+            }, (long) (420 * Prefs.k()));
         }
 
         private void kill(String pkg) {
             Recents.remove(RecentsActivity.this, pkg);
-            try {
-                getSystemService(ActivityManager.class).killBackgroundProcesses(pkg);
-            } catch (RuntimeException ignored) {
-            }
+            Unload.one(RecentsActivity.this, pkg);
         }
 
         private void launch(int i) {

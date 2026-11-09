@@ -102,7 +102,7 @@ final class Shade {
         // на экране блокировки шторки нет: уведомления и плитки — только после входа
         if (LockActivity.locked || AodActivity.active) return null;
         if (panel != null) {
-            if (panel.control == control) return panel;
+            if (panel.control == control || panel.wide) return panel;
             hide();
         }
         Panel p = new Panel(svc, control);
@@ -187,10 +187,11 @@ final class Shade {
 
     /** Сама шторка: фон темы (матовые обои или сплошной), время; ниже уведомления или плитки. */
     private static final class Panel extends FrameLayout {
-        final boolean control;
+        final boolean control, wide;
         private float progress;
-        private final ScrollView scroll;
-        private final LinearLayout col, list;
+        private final ScrollView scroll, scroll2;
+        private final LinearLayout col, col2, list;
+        private final View body;
         private final TextView time, date, clear, empty;
         private TileGrid tiles;   // не final: на него ссылаются лямбды в конструкторе
         private final int slop;
@@ -210,19 +211,24 @@ final class Shade {
             setWillNotDraw(false);
             setFocusableInTouchMode(true);
             slop = ViewConfiguration.get(c).getScaledTouchSlop();
-            scroll = new ScrollView(c);
-            scroll.setVerticalScrollBarEnabled(false);
-            scroll.setOverScrollMode(OVER_SCROLL_NEVER);
-            col = new LinearLayout(c);
-            col.setOrientation(LinearLayout.VERTICAL);
-            col.setPadding(Ui.dp(14), statusBar(c) + Ui.dp(10), Ui.dp(14), Ui.dp(48));
-            scroll.addView(col, new LayoutParams(-1, -2));
-            addView(scroll, new LayoutParams(-1, -1));
-            // касание мимо карточек и плиток — закрыть (в правке — закончить правку)
-            col.setOnClickListener(v -> {
-                if (tiles != null && tiles.edit) tiles.setEdit(false);
-                else animateTo(0);
-            });
+            // телефон лёжа: сетка на всю ширину раздулась бы — уведомления и плитки рядом, в одной шторке
+            wide = c.getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+            scroll = column(c);
+            col = (LinearLayout) scroll.getChildAt(0);
+            if (wide) {
+                scroll2 = column(c);
+                col2 = (LinearLayout) scroll2.getChildAt(0);
+                LinearLayout twin = new LinearLayout(c);
+                twin.addView(scroll, new LinearLayout.LayoutParams(0, -1, 1));
+                twin.addView(scroll2, new LinearLayout.LayoutParams(0, -1, 1));
+                addView(twin, new LayoutParams(-1, -1));
+                body = twin;
+            } else {
+                scroll2 = null;
+                col2 = col;
+                addView(scroll, new LayoutParams(-1, -1));
+                body = scroll;
+            }
             // матовая подложка — те же размытые обои, что у пункта управления на столе
             if (Ui.wallBlur == null) Ui.loadWall(c);
 
@@ -232,12 +238,12 @@ final class Shade {
             head.setPadding(Ui.dp(8), 0, 0, Ui.dp(10));
             LinearLayout td = new LinearLayout(c);
             td.setOrientation(LinearLayout.VERTICAL);
-            time = Views.label(c, "", 40, Look.digits(Ui.light), Look.fg());
+            time = Views.label(c, "", wide ? 30 : 40, Look.digits(Ui.light), Look.fg());
             date = Views.label(c, "", 14, Ui.medium, Look.fg2());
             td.addView(time);
             td.addView(date);
             head.addView(td, new LinearLayout.LayoutParams(0, -2, 1));
-            if (control) {
+            if (control || wide) {
                 // правка и добавление плиток — здесь же
                 TextView edit = editBtn = Views.pill(c, "Изменить");
                 edit.setTextColor(Look.fg());
@@ -255,18 +261,21 @@ final class Shade {
             head.addView(gear, new LinearLayout.LayoutParams(Ui.dp(40), Ui.dp(40)));
             col.addView(head);
 
-            if (!control) {
-                tiles = null;
+            if (!control || wide) {
                 buildNotes(c);
                 list = this.list0;
                 clear = this.clear0;
                 empty = this.empty0;
+            } else {
+                list = null;
+                clear = null;
+                empty = null;
+            }
+            if (!control && !wide) {
+                tiles = null;
                 setProgress(0);
                 return;
             }
-            list = null;
-            clear = null;
-            empty = null;
             tiles = new TileGrid(c);
             tiles.host = new TileGrid.Host() {
                 @Override
@@ -304,8 +313,44 @@ final class Shade {
                     Tiles.slider(c, type, value);
                 }
             };
-            col.addView(tiles, new LinearLayout.LayoutParams(-1, -2));
+            col2.addView(tiles, new LinearLayout.LayoutParams(-1, -2));
             setProgress(0);
+        }
+
+        /** Колонка шторки: касание мимо карточек и плиток закрывает (в правке — заканчивает правку). */
+        private ScrollView column(Context c) {
+            ScrollView sv = new ScrollView(c);
+            sv.setVerticalScrollBarEnabled(false);
+            sv.setOverScrollMode(OVER_SCROLL_NEVER);
+            LinearLayout box = new LinearLayout(c);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setPadding(Ui.dp(14), statusBar(c) + Ui.dp(10), Ui.dp(14), Ui.dp(48));
+            box.setOnClickListener(v -> {
+                if (tiles != null && tiles.edit) tiles.setEdit(false);
+                else animateTo(0);
+            });
+            sv.addView(box, new LayoutParams(-1, -2));
+            return sv;
+        }
+
+        /** Вбок от выреза и кнопок навигации: лёжа они стоят по краям. */
+        @Override
+        public android.view.WindowInsets onApplyWindowInsets(android.view.WindowInsets in) {
+            if (wide) {
+                android.view.DisplayCutout dc = in.getDisplayCutout();
+                body.setPadding(Math.max(dc == null ? 0 : dc.getSafeInsetLeft(), in.getSystemWindowInsetLeft()), 0,
+                        Math.max(dc == null ? 0 : dc.getSafeInsetRight(), in.getSystemWindowInsetRight()), 0);
+            }
+            return super.onApplyWindowInsets(in);
+        }
+
+        /** Телефон повернули при открытой шторке: другая раскладка, откроют заново. */
+        @Override
+        protected void onConfigurationChanged(android.content.res.Configuration n) {
+            super.onConfigurationChanged(n);
+            if ((n.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) != wide) post(() -> {
+                if (panel == this) hide();
+            });
         }
 
         /** Выбор плитки — на всю шторку, сплошной; выбрали или «назад» — обратно к плиткам. */
@@ -412,8 +457,8 @@ final class Shade {
         void setProgress(float p) {
             progress = p;
             float k = Ui.clamp(p);
-            scroll.setAlpha(k);
-            scroll.setTranslationY(-Ui.dpf(48) * (1 - k));
+            body.setAlpha(k);
+            body.setTranslationY(-Ui.dpf(48) * (1 - k));
             invalidate();
         }
 
@@ -470,7 +515,8 @@ final class Shade {
                 case MotionEvent.ACTION_MOVE: {
                     float dy = e.getY() - downY, dx = e.getX() - downX;
                     boolean busy = picker != null || tiles != null && tiles.edit;
-                    if (!busy && dy < -slop && Math.abs(dy) > Math.abs(dx) * 1.3f && !scroll.canScrollVertically(1)) {
+                    ScrollView under = wide && downX > getWidth() / 2f ? scroll2 : scroll;
+                    if (!busy && dy < -slop && Math.abs(dy) > Math.abs(dx) * 1.3f && !under.canScrollVertically(1)) {
                         closing = true;
                         startP = progress;
                         downY = e.getY();

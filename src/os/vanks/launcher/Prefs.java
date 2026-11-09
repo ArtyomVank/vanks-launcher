@@ -91,6 +91,7 @@ final class Prefs {
 
     static void load(Context c) {
         sp = c.getSharedPreferences("vanks", Context.MODE_PRIVATE);
+        Walls.loadMine(c);
         firstRun = !sp.contains("home");
         accent = sp.getInt("accent", 0xFF7C5CFF);
         // 0.1–0.2 хранили номер цвета

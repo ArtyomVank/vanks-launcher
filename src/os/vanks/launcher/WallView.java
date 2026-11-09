@@ -7,6 +7,8 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.RecordingCanvas;
 import android.graphics.RenderNode;
 import android.graphics.RuntimeShader;
@@ -32,7 +34,7 @@ import android.view.View;
  * (frost) — весь экран становится матовым стеклом.
  */
 final class WallView extends View {
-    static final float LOCK_POSE = 0.3f, INTRO_SECONDS = 6f, FLIGHT_MS = 1700f;
+    static final float LOCK_POSE = 0.3f, INTRO_SECONDS = 6f, FLIGHT_MS = 1700f, FAR_POSE = 0.62f;
 
     float frost;   // 0…1: насколько всё матовое
     float dim;     // 0…1: затемнение
@@ -52,6 +54,17 @@ final class WallView extends View {
     private long last, lastRecord;
 
     private final boolean lockLayer;   // свои обои экрана блокировки
+
+    // свои обои из видео и GIF
+    private WallClip clip;
+    private Bitmap poster;     // живые: первый кадр, пока не доиграли
+    private boolean clipRun;   // живые: идут после входа
+    private boolean flying;    // супер: камера ещё летит
+    private float cover;       // 0…1: картинка поверх видео (плавный уход в неподвижный кадр)
+    private android.animation.ValueAnimator zoomAnim;
+    private final Runnable syncClip = this::syncClip;
+    private final Path hole = new Path();
+    private final RectF holeRect = new RectF();
 
     WallView(Context c) {
         this(c, false);
@@ -97,6 +110,12 @@ final class WallView extends View {
                 shader = null;
             }
         }
+        if (clip != null) clip.stop();
+        clip = spec.clip != null ? new WallClip(this, spec.clip) : null;
+        poster = null;
+        clipRun = false;
+        cover = 0;
+        askClip();
         dirty = true;
         invalidate();
     }
@@ -153,16 +172,28 @@ final class WallView extends View {
         locked = true;
         flightStart = -1;
         flight = 0;
-        zoom = 1.06f;
+        if (zoomAnim != null) zoomAnim.cancel();
+        zoom = lockZoom();
         // фото на экране входа — размытые, как на компьютере (кроме «глубины»:
         // там гора должна быть чёткой); супер и живые — как есть
-        frost = spec != null && spec.kind == Walls.PHOTO && !(Prefs.depth && spec.fg != 0) ? 1f : 0f;
+        frost = spec != null && spec.kind == Walls.PHOTO && spec.effect == Walls.STILL && !(Prefs.depth && spec.fg != 0) ? 1f : 0f;
         if (spec != null && spec.kind == Walls.FLOW) {
             intro = Math.min(intro, LOCK_POSE);
             introTarget = LOCK_POSE;
         }
+        clipRun = false;
+        cover = 0;
+        if (spec != null && spec.poster != 0 && poster == null) poster = Ui.decode(getContext(), spec.poster, Ui.fitScale(getContext(), spec.poster));
+        askClip();
         dirty = true;
         invalidate();
+    }
+
+    /** Поза экрана входа: супер — издалека, живая картинка — ближе, чем после входа. */
+    private float lockZoom() {
+        if (spec != null && spec.effect == Walls.SUPER) return FAR_POSE;
+        if (spec != null && spec.effect == Walls.LIVE && spec.clip == null) return 1.22f;
+        return 1.06f;
     }
 
     /** Стоят в позе экрана входа (ждут входа, чтобы доиграть появление). */
@@ -176,10 +207,16 @@ final class WallView extends View {
         flightFrom = flight;
         flightStart = SystemClock.uptimeMillis();
         introTarget = 1;
-        Anim.run(zoom, 1f, 850, Anim.PC, z -> {
+        if (zoomAnim != null) zoomAnim.cancel();
+        int effect = spec == null ? Walls.STILL : spec.effect;
+        clipRun = effect == Walls.LIVE && clip != null;
+        flying = effect == Walls.SUPER;
+        long ms = effect == Walls.SUPER ? (long) (FLIGHT_MS / Prefs.k()) : effect == Walls.LIVE && clip == null ? 2400 : 850;
+        zoomAnim = Anim.run(zoom, 1f, ms, Anim.PC, z -> {
             zoom = z;
             if (shader == null) invalidate();
-        }, null);
+        }, this::flown);
+        askClip();
         if (frost > 0) Anim.run(frost, 0f, 850, Anim.STD, f -> {
             frost = f;
             invalidate();
@@ -193,13 +230,77 @@ final class WallView extends View {
         intro = 0;
         introTarget = locked ? LOCK_POSE : 1;
         if (!locked) flight = 1;
+        if (clip != null && spec.effect == Walls.LIVE && !locked) {
+            // только что выбрали: показать, как они доигрывают
+            if (spec.poster != 0 && poster == null) poster = Ui.decode(getContext(), spec.poster, Ui.fitScale(getContext(), spec.poster));
+            clipRun = true;
+            askClip();
+        }
         last = SystemClock.uptimeMillis();
         dirty = true;
         invalidate();
     }
 
+    /** Камера долетела: видео плавно уступает неподвижному кадру. */
+    private void flown() {
+        if (!flying || locked) return;
+        if (clip == null || !clip.showing || Prefs.wallAnimate) {
+            flying = false;
+            askClip();
+            return;
+        }
+        Anim.run(0f, 1f, 420, Anim.STD, v -> {
+            cover = v;
+            invalidate();
+        }, () -> {
+            if (locked) return;
+            flying = false;
+            askClip();
+        });
+    }
+
+    /** Видео доиграло (или не смогло): дальше неподвижный последний кадр. */
+    void clipEnded() {
+        clipRun = false;
+        poster = null;
+        if (clip != null && spec != null && spec.effect != Walls.LIVE) {
+            // анимированные и супер не смогли играть — останется картинка
+            clip.stop();
+            clip = null;
+        }
+        if (clip != null) clip.stop();
+        invalidate();
+    }
+
+    private void askClip() {
+        removeCallbacks(syncClip);
+        post(syncClip);
+    }
+
+    /** Отложенно: TextureView нельзя добавлять, пока окно раскладывает виды. */
+    private void syncClip() {
+        if (clip == null || spec == null) return;
+        boolean want = !paused && getVisibility() == VISIBLE && isAttachedToWindow();
+        if (spec.effect == Walls.LIVE) want &= clipRun;
+        else if (spec.effect == Walls.SUPER) want &= locked || flying || Prefs.wallAnimate;
+        if (want) clip.play(spec.effect != Walls.LIVE);
+        else clip.stop();
+    }
+
+    @Override
+    protected void onVisibilityChanged(View changed, int v) {
+        super.onVisibilityChanged(changed, v);
+        if (changed == this) askClip();
+    }
+
     void setPaused(boolean p) {
         paused = p;
+        if (p && clipRun) {
+            // ушли с экрана, не дождавшись конца: дальше показывать нечего
+            clipRun = false;
+            poster = null;
+        }
+        askClip();
         last = SystemClock.uptimeMillis();
         if (!p) {
             dirty = true;
@@ -246,9 +347,11 @@ final class WallView extends View {
                 shader = null;
             }
         }
-        if (!drawn) {
-            paint.setAlpha(255);
-            Bitmap b = still();
+        boolean video = clip != null && clip.showing;
+        if (video) clip.draw(c, w, h, zoom);
+        if (!drawn && (!video || cover > 0.001f)) {
+            paint.setAlpha(video ? Math.round(255 * cover) : 255);
+            Bitmap b = poster != null ? poster : still();
             if (b == null || b.isRecycled()) {
                 // картинка ещё не загружена (запуск телефона) — загрузить сейчас
                 Ui.loadWall(getContext());
@@ -256,6 +359,21 @@ final class WallView extends View {
                 b = still();
             }
             if (b != null) c.drawBitmap(b, Ui.wallMatrix(b, w, h, zoom, m), paint);
+        }
+        if (zoom < 0.999f) {
+            // супер обои издалека: вокруг кадра — его размытая копия
+            Bitmap b = blurred();
+            float rw = w * zoom / 2f, rh = h * zoom / 2f;
+            holeRect.set(w / 2f - rw, h / 2f - rh, w / 2f + rw, h / 2f + rh);
+            hole.reset();
+            hole.addRoundRect(holeRect, Ui.dpf(28), Ui.dpf(28), Path.Direction.CW);
+            c.save();
+            c.clipOutPath(hole);
+            if (b != null && !b.isRecycled()) {
+                paint.setAlpha(255);
+                c.drawBitmap(b, Ui.wallMatrix(b, w, h, 1f, m), paint);
+            }
+            c.restore();
         }
         if (frost > 0.001f) {
             paint.setAlpha(Math.round(255 * Ui.clamp(frost)));

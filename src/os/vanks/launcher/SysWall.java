@@ -35,7 +35,7 @@ final class SysWall {
     private static void set(Context c, WallpaperManager wm, Walls.W w, int which) throws java.io.IOException {
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inScaled = false;
-        Bitmap b = BitmapFactory.decodeResource(c.getResources(), w.still, o);
+        Bitmap b = Walls.decode(c, w.still, o);
         if (b != null) wm.setBitmap(b, null, true, which);
     }
 
