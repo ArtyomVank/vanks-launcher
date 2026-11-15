@@ -281,10 +281,10 @@ final class Desk extends FrameLayout {
     }
 
     /**
-     * Значок пакета на текущем столе — на экране: сам значок или место в папке,
-     * где он лежит. Нет на этом столе — null.
+     * Значок (ключ — см. Home.isKey) на текущем столе — на экране: сам значок
+     * или место в папке, где он лежит. Нет на этом столе — null.
      */
-    RectF iconOnScreen(String pkg) {
+    RectF iconOnScreen(String key) {
         int cur = Math.round(pos);
         if (cur < 0 || cur >= views.size()) return null;
         PageView pv = views.get(cur);
@@ -295,12 +295,12 @@ final class Desk extends FrameLayout {
             Layout.Item it = iv.item;
             if (Layout.APP.equals(it.type)) {
                 Apps.App a = Apps.byKey.get(it.key);
-                if (a != null && a.cn != null && pkg.equals(a.cn.getPackageName()))
+                if (Home.isKey(a, key))
                     return iv.screenRect(iv.iconRect(new RectF()));
             } else if (Layout.FOLDER.equals(it.type) && inFolder == null) {
                 for (String k : it.apps) {
                     Apps.App a = Apps.byKey.get(k);
-                    if (a == null || a.cn == null || !pkg.equals(a.cn.getPackageName())) continue;
+                    if (!Home.isKey(a, key)) continue;
                     inFolder = iv.screenRect(Folders.slotRect(it, iv.folderBody(new RectF()), k));
                     break;
                 }

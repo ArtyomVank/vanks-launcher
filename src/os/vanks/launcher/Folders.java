@@ -353,8 +353,8 @@ final class Folders {
         }
 
         /** Значок пакета в открытой папке — на экране; нет — null. */
-        RectF rectOf(String pkg) {
-            return closing ? null : grid.rectOf(pkg);
+        RectF rectOf(String key) {
+            return closing ? null : grid.rectOf(key);
         }
 
         void redrawIcons() {

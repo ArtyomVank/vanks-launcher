@@ -850,16 +850,16 @@ public final class Home extends Activity {
             if (VanksAccess.flying() || contractFly) launchCard.drop();
             else {
                 // садиться туда, где значок сейчас (папку могли закрыть, стол — пролистать)
-                RectF to = closeTarget(lastPkg);
+                RectF to = closeTarget(lastKey);
                 if (to != null) {
                     int[] loc = new int[2];
                     root.getLocationInWindow(loc);
                     to.offset(-loc[0], -loc[1]);
                     launchCard.landAt(to);
                 }
-                String pkg = lastPkg;
-                hideIcon(pkg);
-                launchCard.close(() -> showIcon(pkg));
+                String key = lastKey;
+                hideIcon(key);
+                launchCard.close(() -> showIcon(key));
             }
             launchCard = null;
         }
@@ -900,21 +900,34 @@ public final class Home extends Activity {
         depthClock.start();
     }
 
-    /** Откуда открыли приложение: пакет, место значка на экране и сам значок — сюда окно и вернётся. */
-    static String lastPkg;
+    /**
+     * Откуда открыли приложение: пакет, значок («пакет/класс» — у одного пакета
+     * их бывает несколько: «Настройки», «Игры», камера у Vanks), место значка
+     * на экране и сам значок — сюда окно и вернётся.
+     */
+    static String lastPkg, lastKey;
     static RectF lastRect;
     static android.graphics.Bitmap lastIcon;
 
-    /** Пакет, в чей значок сейчас садится окно: значок не рисуем, пока окно не село — иначе их два. */
-    private static String flyingPkg;
+    /**
+     * Значок, в который сейчас садится окно: не рисуем его, пока окно не село —
+     * иначе их два. Ключ — «пакет/класс» (ровно этот значок) или пакет.
+     */
+    private static String flyingKey;
     private static final Runnable unhide = () -> showIcon(null);
 
     static boolean flyingTo(Apps.App a) {
-        return flyingPkg != null && a.cn != null && flyingPkg.equals(a.cn.getPackageName());
+        return isKey(a, flyingKey);
     }
 
-    static void hideIcon(String pkg) {
-        flyingPkg = pkg;
+    /** Значок по ключу: «пакет/класс» — только он, просто пакет — любой значок пакета. */
+    static boolean isKey(Apps.App a, String key) {
+        if (a == null || a.cn == null || key == null) return false;
+        return key.indexOf('/') >= 0 ? key.equals(a.cn.flattenToString()) : key.equals(a.cn.getPackageName());
+    }
+
+    static void hideIcon(String key) {
+        flyingKey = key;
         redrawIcons();
         // страховка: что бы ни случилось с полётом, значок вернётся
         Home h = shown;
@@ -924,10 +937,10 @@ public final class Home extends Activity {
         }
     }
 
-    /** Окно село (pkg == null — какое бы ни летело): значок снова виден. */
-    static void showIcon(String pkg) {
-        if (flyingPkg == null || (pkg != null && !pkg.equals(flyingPkg))) return;
-        flyingPkg = null;
+    /** Окно село (key == null — какое бы ни летело): значок снова виден. */
+    static void showIcon(String key) {
+        if (flyingKey == null || (key != null && !key.equals(flyingKey))) return;
+        flyingKey = null;
         redrawIcons();
     }
 
@@ -943,16 +956,18 @@ public final class Home extends Activity {
      * Куда садиться окну пакета при закрытии, на экране и как будто стол уже
      * не в глубине: открытая папка, док, текущий стол (сам значок или папка с
      * ним), иначе — откуда открывали. Нет нигде — null (окно просто тает).
+     * key — «пакет/класс» или пакет (см. isKey).
      */
-    static RectF closeTarget(String pkg) {
+    static RectF closeTarget(String key) {
         Home h = shown;
-        if (h == null || pkg == null) return null;
-        RectF r = h.folder != null ? h.folder.rectOf(pkg) : null;
+        if (h == null || key == null) return null;
+        RectF r = h.folder != null ? h.folder.rectOf(key) : null;
         if (r != null) return r;   // папка лежит поверх стола и в глубину не уходит
-        r = h.dockGrid.rectOf(pkg);
-        if (r == null) r = h.desk.iconOnScreen(pkg);
+        r = h.dockGrid.rectOf(key);
+        if (r == null) r = h.desk.iconOnScreen(key);
         if (r != null) return h.flat(r);
-        return pkg.equals(lastPkg) && lastRect != null ? new RectF(lastRect) : null;
+        boolean last = key.equals(lastKey) || key.equals(lastPkg);
+        return last && lastRect != null ? new RectF(lastRect) : null;
     }
 
     /** Место на уменьшенном (ушедшем вглубь) столе → где оно будет, когда стол вернётся. */
@@ -988,8 +1003,10 @@ public final class Home extends Activity {
             android.content.ComponentName cn = gc.getParcelable(Intent.EXTRA_COMPONENT_NAME);
             android.os.Message cb = gc.getParcelable("android.intent.extra.REMOTE_CALLBACK");
             if (cn == null || cb == null || cb.replyTo == null) return;
-            String pkg = cn.getPackageName();
-            RectF to = closeTarget(pkg);
+            // сначала ровно этот значок, потом любой значок пакета
+            String key = cn.flattenToString();
+            RectF to = closeTarget(key);
+            if (to == null) to = closeTarget(key = cn.getPackageName());
             if (to == null) return;
             if (landedMessenger == null) landedMessenger = new android.os.Messenger(new Handler(Looper.getMainLooper(), m -> {
                 showIcon(null);
@@ -1004,7 +1021,7 @@ public final class Home extends Activity {
             m.copyFrom(cb);
             m.setData(res);
             cb.replyTo.send(m);
-            hideIcon(pkg);
+            hideIcon(key);
             contractFly = true;
         } catch (Exception ignored) {
             // чужой или старый формат — тогда обычный возврат
@@ -1132,6 +1149,7 @@ public final class Home extends Activity {
         root.addView(card, new FrameLayout.LayoutParams(-1, -1));
         launchCard = card;
         lastPkg = a.cn.getPackageName();
+        lastKey = a.cn.flattenToString();
         lastRect = flat;
         lastIcon = a.bmp;
         Feel.sound(this, "app-open");

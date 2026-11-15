@@ -139,11 +139,10 @@ final class AppGrid extends View {
         return Ui.toWindow(this, out);
     }
 
-    /** Где на экране значок пакета (с масштабом); нет в ряду — null. */
-    RectF rectOf(String pkg) {
+    /** Где на экране значок (ключ — см. Home.isKey) с масштабом; нет в ряду — null. */
+    RectF rectOf(String key) {
         for (int i = 0; i < apps.size(); i++) {
-            Apps.App a = apps.get(i);
-            if (a.cn != null && pkg.equals(a.cn.getPackageName())) return screenRect(i);
+            if (Home.isKey(apps.get(i), key)) return screenRect(i);
         }
         return null;
     }
