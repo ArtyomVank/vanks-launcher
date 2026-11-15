@@ -280,6 +280,35 @@ final class Desk extends FrameLayout {
         dragMove(rawX, rawY);
     }
 
+    /**
+     * Значок пакета на текущем столе — на экране: сам значок или место в папке,
+     * где он лежит. Нет на этом столе — null.
+     */
+    RectF iconOnScreen(String pkg) {
+        int cur = Math.round(pos);
+        if (cur < 0 || cur >= views.size()) return null;
+        PageView pv = views.get(cur);
+        RectF inFolder = null;
+        for (int i = 0; i < pv.getChildCount(); i++) {
+            if (!(pv.getChildAt(i) instanceof ItemView)) continue;
+            ItemView iv = (ItemView) pv.getChildAt(i);
+            Layout.Item it = iv.item;
+            if (Layout.APP.equals(it.type)) {
+                Apps.App a = Apps.byKey.get(it.key);
+                if (a != null && a.cn != null && pkg.equals(a.cn.getPackageName()))
+                    return iv.screenRect(iv.iconRect(new RectF()));
+            } else if (Layout.FOLDER.equals(it.type) && inFolder == null) {
+                for (String k : it.apps) {
+                    Apps.App a = Apps.byKey.get(k);
+                    if (a == null || a.cn == null || !pkg.equals(a.cn.getPackageName())) continue;
+                    inFolder = iv.screenRect(Folders.slotRect(it, iv.folderBody(new RectF()), k));
+                    break;
+                }
+            }
+        }
+        return inFolder;
+    }
+
     private ItemView viewOf(Layout.Item it) {
         for (PageView pv : views)
             for (int i = 0; i < pv.getChildCount(); i++) {
@@ -722,7 +751,7 @@ final class Desk extends FrameLayout {
                     Apps.App a = Apps.byKey.get(item.key);
                     if (a == null) break;
                     iconRect(r);
-                    if (a.bmp != null) c.drawBitmap(a.bmp, null, r, bmp);
+                    if (a.bmp != null && !Home.flyingTo(a)) c.drawBitmap(a.bmp, null, r, bmp);
                     drawLabel(c, a.label, r.bottom);
                     break;
                 }

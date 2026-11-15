@@ -164,7 +164,7 @@ public final class GamesActivity extends Activity {
             col.addView(note("Нужен эмулятор Windows",
                     "Windows-игры на телефоне запускает эмулятор: Wine переводит Windows в Android, Box64 — команды компьютера в команды телефона. "
                             + "Бесплатный и открытый — Winlator: скачайте его со страницы проекта, установите, добавьте игру (папку с .exe) "
-                            + "и нажмите у неё «Добавить на главный экран». Подойдут и GameHub, GameNative.",
+                            + "и нажмите у неё «Добавить на главный экран». Подойдут и Vanks Proton, GameHub, GameNative.",
                     "Winlator на GitHub", () -> open(new Intent(Intent.ACTION_VIEW, Uri.parse(Games.WINLATOR_PAGE)))), lp(-1, -2, 0, 0, 0, 14));
         }
 

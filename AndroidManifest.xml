@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="os.vanks.launcher"
-    android:versionCode="28"
-    android:versionName="0.28">
+    android:versionCode="29"
+    android:versionName="0.29">
 
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="36" />
 
@@ -128,6 +128,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Vanks OS: системное «Настройки» (ACTION_SETTINGS) — наши. Выключен, на
+             Vanks OS включает SettingsActivity.sync: на обычном телефоне чужой
+             системный экран не перехватываем (выбор «чем открыть» был бы лишним) -->
+        <activity-alias
+            android:name=".SettingsOs"
+            android:targetActivity=".SettingsActivity"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter android:priority="100">
+                <action android:name="android.settings.SETTINGS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
         <activity
             android:name=".GamesActivity"
             android:exported="true"

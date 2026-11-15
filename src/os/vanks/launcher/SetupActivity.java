@@ -299,10 +299,24 @@ public final class SetupActivity extends Activity {
 
     private void walls(LinearLayout col) {
         col.addView(title("Обои"));
-        col.addView(sub("На главный экран и экран блокировки. Больше — в «Настройках Vanks»."));
-        List<Walls.W> list = new ArrayList<>();
-        for (Walls.W w : Walls.PHOTOS) list.add(w);
-        for (Walls.W w : Walls.all()) if (w.kind != Walls.PHOTO && list.size() < 12) list.add(w);
+        col.addView(sub("На главный экран и экран блокировки. Супер обои: на экране блокировки — вид издалека, при входе камера летит к ним. Живые: при входе доигрывают и замирают. Больше — в «Настройках Vanks»."));
+        List<Walls.W> supers = new ArrayList<>(), live = new ArrayList<>(), photos = new ArrayList<>();
+        java.util.HashSet<String> groups = new java.util.HashSet<>();
+        for (Walls.W w : Walls.all()) {
+            if (w.mineId != 0) continue;
+            if (w.kind == Walls.SHADER) supers.add(w);
+            // живых много: по одним из каждой группы («Круги», «Волны»…)
+            else if (w.kind == Walls.FLOW && live.size() < 6 && groups.add(w.group)) live.add(w);
+            else if (w.kind == Walls.PHOTO) photos.add(w);
+        }
+        wallRows(col, "Супер обои", supers);
+        wallRows(col, "Живые обои", live);
+        wallRows(col, "Фото", photos);
+    }
+
+    private void wallRows(LinearLayout col, String name, List<Walls.W> list) {
+        if (list.isEmpty()) return;
+        col.addView(header(name));
         LinearLayout row = null;
         for (int i = 0; i < list.size(); i++) {
             Walls.W w = list.get(i);
@@ -665,6 +679,19 @@ public final class SetupActivity extends Activity {
         iv.setBackground(d);
         if (on) iv.setPadding(Ui.dp(3), Ui.dp(3), Ui.dp(3), Ui.dp(3));
         f.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+        // подпись снизу: имя, у живых и супер — ещё и вид
+        TextView cap = new TextView(this);
+        cap.setText(w.kind == Walls.SHADER ? "Супер · " + w.title : w.kind == Walls.FLOW ? "Живые · " + w.group : w.title);
+        cap.setTextSize(11);
+        cap.setTypeface(Ui.medium);
+        cap.setTextColor(0xFFFFFFFF);
+        cap.setSingleLine(true);
+        cap.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        cap.setPadding(Ui.dp(8), Ui.dp(4), Ui.dp(8), Ui.dp(4));
+        cap.setBackground(Views.round(0x8C000000, 10));
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, android.view.Gravity.BOTTOM | android.view.Gravity.START);
+        cp.setMargins(Ui.dp(8), 0, Ui.dp(8), Ui.dp(8));
+        f.addView(cap, cp);
         f.setOnClickListener(v -> {
             Feel.buzz(v, Feel.CLICK);
             Prefs.wallpaper = w.id;

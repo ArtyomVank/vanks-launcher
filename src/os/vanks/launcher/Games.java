@@ -18,11 +18,15 @@ import java.util.Locale;
  * собирает такие ярлыки в одну библиотеку — «Игры Vanks».
  */
 final class Games {
-    /** Известные эмуляторы: пакет и имя. Сборки Winlator узнаются и по «winlator» в пакете. */
+    /**
+     * Известные эмуляторы: пакет и имя. Сборки Winlator узнаются и по «winlator» в пакете.
+     * Без имени — подпись берётся у установленного приложения: app.gamenative — это и
+     * GameNative, и Vanks Proton (его сборка с тем же пакетом).
+     */
     private static final String[][] KNOWN = {
             {"com.winlator", "Winlator"},
             {"com.winlator.cmod", "Winlator CMod"},
-            {"app.gamenative", "GameNative"},
+            {"app.gamenative", null},
             {"com.xiaoji.egggame", "GameHub"},
             {"com.OxGames.Pluvia", "Pluvia"},
             {"com.eltechs.ed", "ExaGear"},
@@ -40,7 +44,7 @@ final class Games {
 
     /** Имя эмулятора для подписи под игрой. */
     static String emulatorName(String pkg) {
-        for (String[] k : KNOWN) if (k[0].equals(pkg)) return k[1];
+        for (String[] k : KNOWN) if (k[0].equals(pkg) && k[1] != null) return k[1];
         for (Apps.App a : Apps.all) if (a.cn.getPackageName().equals(pkg)) return a.label;
         return pkg;
     }

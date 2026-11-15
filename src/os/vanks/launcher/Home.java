@@ -185,6 +185,7 @@ public final class Home extends Activity {
         Ui.init(this);
         Feel.init(this);
         CameraActivity.sync(this);
+        SettingsActivity.sync(this);
         Apps.load(this);
         if (Prefs.firstRun || (Prefs.home.isEmpty() && Prefs.dock.isEmpty())) Apps.pickDefaults(this);
         Apps.renderIcons(this, iconPx());
@@ -421,10 +422,12 @@ public final class Home extends Activity {
     protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
         boolean here = resumedNow;
+        gestureContract(i);
         // кнопка «домой», когда лаунчер уже открыт: всё закрыть
         boolean open = control.isOpen() || search.isOpen() || menu != null || folder != null || picker != null || desk.editing;
         if (menu != null) menu.dismiss();
-        if (folder != null) folder.close();
+        // из приложения домой — папка, откуда его открыли, остаётся открытой
+        if (folder != null && here) folder.close();
         if (picker != null) picker.close();
         if (desk.editing) desk.setEditing(false);
         if (control.isOpen()) closeControl();
@@ -843,11 +846,24 @@ public final class Home extends Activity {
     private void land() {
         homeLayer.animate().cancel();
         if (launchCard != null) {
-            // жестом домой окно в значок уносит служба жестов — карточка не нужна
-            if (VanksAccess.flying()) launchCard.drop();
-            else launchCard.close(null);
+            // жестом домой окно в значок уносит служба жестов или система — карточка не нужна
+            if (VanksAccess.flying() || contractFly) launchCard.drop();
+            else {
+                // садиться туда, где значок сейчас (папку могли закрыть, стол — пролистать)
+                RectF to = closeTarget(lastPkg);
+                if (to != null) {
+                    int[] loc = new int[2];
+                    root.getLocationInWindow(loc);
+                    to.offset(-loc[0], -loc[1]);
+                    launchCard.landAt(to);
+                }
+                String pkg = lastPkg;
+                hideIcon(pkg);
+                launchCard.close(() -> showIcon(pkg));
+            }
             launchCard = null;
         }
+        contractFly = false;
         if (depth.v < 0.05f) depth.snap(1);
         setDepth(0, 150, 0.82f);
     }
@@ -888,6 +904,112 @@ public final class Home extends Activity {
     static String lastPkg;
     static RectF lastRect;
     static android.graphics.Bitmap lastIcon;
+
+    /** Пакет, в чей значок сейчас садится окно: значок не рисуем, пока окно не село — иначе их два. */
+    private static String flyingPkg;
+    private static final Runnable unhide = () -> showIcon(null);
+
+    static boolean flyingTo(Apps.App a) {
+        return flyingPkg != null && a.cn != null && flyingPkg.equals(a.cn.getPackageName());
+    }
+
+    static void hideIcon(String pkg) {
+        flyingPkg = pkg;
+        redrawIcons();
+        // страховка: что бы ни случилось с полётом, значок вернётся
+        Home h = shown;
+        if (h != null) {
+            h.ui.removeCallbacks(unhide);
+            h.ui.postDelayed(unhide, 2500);
+        }
+    }
+
+    /** Окно село (pkg == null — какое бы ни летело): значок снова виден. */
+    static void showIcon(String pkg) {
+        if (flyingPkg == null || (pkg != null && !pkg.equals(flyingPkg))) return;
+        flyingPkg = null;
+        redrawIcons();
+    }
+
+    private static void redrawIcons() {
+        Home h = shown;
+        if (h == null || h.desk == null) return;
+        h.desk.invalidateAll();
+        h.dockGrid.invalidate();
+        if (h.folder != null) h.folder.redrawIcons();
+    }
+
+    /**
+     * Куда садиться окну пакета при закрытии, на экране и как будто стол уже
+     * не в глубине: открытая папка, док, текущий стол (сам значок или папка с
+     * ним), иначе — откуда открывали. Нет нигде — null (окно просто тает).
+     */
+    static RectF closeTarget(String pkg) {
+        Home h = shown;
+        if (h == null || pkg == null) return null;
+        RectF r = h.folder != null ? h.folder.rectOf(pkg) : null;
+        if (r != null) return r;   // папка лежит поверх стола и в глубину не уходит
+        r = h.dockGrid.rectOf(pkg);
+        if (r == null) r = h.desk.iconOnScreen(pkg);
+        if (r != null) return h.flat(r);
+        return pkg.equals(lastPkg) && lastRect != null ? new RectF(lastRect) : null;
+    }
+
+    /** Место на уменьшенном (ушедшем вглубь) столе → где оно будет, когда стол вернётся. */
+    private RectF flat(RectF r) {
+        float sc = homeLayer.getScaleX();
+        if (Math.abs(sc - 1) <= 0.002f) return r;
+        int[] hl = new int[2];
+        homeLayer.getLocationOnScreen(hl);
+        float px = hl[0] + homeLayer.getPivotX() * sc, py = hl[1] + homeLayer.getPivotY() * sc;
+        return new RectF(px + (r.left - px) / sc, py + (r.top - py) / sc, px + (r.right - px) / sc, py + (r.bottom - py) / sc);
+    }
+
+    // окно в значок уносит система (жест Quickstep) — своя карточка не нужна
+    private boolean contractFly;
+    private android.os.Messenger landedMessenger;
+
+    /**
+     * Жест «домой» системы (Quickstep в Vanks OS) присылает с интентом домой
+     * вопрос «где значок этого приложения?» (GestureNavContract, как у
+     * Launcher3). Ответим — и система сама уведёт окно точно в значок, а не
+     * в никуда. Когда окно село, она пишет обратно: тогда показываем значок.
+     */
+    private void gestureContract(Intent i) {
+        Bundle gc;
+        try {
+            gc = i.getBundleExtra("gesture_nav_contract_v1");
+        } catch (RuntimeException e) {
+            return;
+        }
+        if (gc == null) return;
+        i.removeExtra("gesture_nav_contract_v1");
+        try {
+            android.content.ComponentName cn = gc.getParcelable(Intent.EXTRA_COMPONENT_NAME);
+            android.os.Message cb = gc.getParcelable("android.intent.extra.REMOTE_CALLBACK");
+            if (cn == null || cb == null || cb.replyTo == null) return;
+            String pkg = cn.getPackageName();
+            RectF to = closeTarget(pkg);
+            if (to == null) return;
+            if (landedMessenger == null) landedMessenger = new android.os.Messenger(new Handler(Looper.getMainLooper(), m -> {
+                showIcon(null);
+                return true;
+            }));
+            android.os.Message landed = android.os.Message.obtain();
+            landed.replyTo = landedMessenger;
+            Bundle res = new Bundle();
+            res.putParcelable("gesture_nav_contract_icon_position", to);
+            res.putParcelable("gesture_nav_contract_finish_callback", landed);
+            android.os.Message m = android.os.Message.obtain();
+            m.copyFrom(cb);
+            m.setData(res);
+            cb.replyTo.send(m);
+            hideIcon(pkg);
+            contractFly = true;
+        } catch (Exception ignored) {
+            // чужой или старый формат — тогда обычный возврат
+        }
+    }
 
     /**
      * Жест снизу на столе (служба жестов): стол уходит вглубь за пальцем,

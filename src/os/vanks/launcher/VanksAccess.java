@@ -338,6 +338,7 @@ public final class VanksAccess extends AccessibilityService {
             return;
         }
         fly = f;
+        Home.hideIcon(shotPkg);
         f.start(rawX, rawY);
         Feel.buzz(f, Feel.TICK);
         // стол — сразу под окно, пока палец ещё ведёт
@@ -351,6 +352,7 @@ public final class VanksAccess extends AccessibilityService {
         shot = null;
         String pkg = shotPkg;
         Runnable remove = () -> {
+            Home.showIcon(pkg);
             try { wm.removeView(f); } catch (Exception ignored) {}
             f.stop();
             if (fly == f) fly = null;
@@ -373,7 +375,7 @@ public final class VanksAccess extends AccessibilityService {
         }
         if (home) {
             Feel.buzz(f, Feel.CLICK);
-            RectF to = pkg != null && pkg.equals(Home.lastPkg) ? Home.lastRect : null;
+            RectF to = Home.closeTarget(pkg);
             f.release(true, vx, vy, to, h -> remove.run());
             return;
         }

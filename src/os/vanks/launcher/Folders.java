@@ -269,7 +269,7 @@ final class Folders {
                 @Override
                 public void tap(Apps.App a, AppGrid g, RectF r) {
                     if (a == null) return;
-                    close();
+                    // папка остаётся открытой: при возврате окно садится в значок в ней
                     home.launch(a, r);
                 }
 
@@ -350,6 +350,15 @@ final class Folders {
                 if (getParent() instanceof FrameLayout) ((FrameLayout) getParent()).removeView(this);
                 home.folderClosed(this);
             });
+        }
+
+        /** Значок пакета в открытой папке — на экране; нет — null. */
+        RectF rectOf(String pkg) {
+            return closing ? null : grid.rectOf(pkg);
+        }
+
+        void redrawIcons() {
+            grid.invalidate();
         }
 
         private void hideKeyboard() {

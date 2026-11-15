@@ -389,10 +389,35 @@ public final class SettingsActivity extends Activity {
             startActivity(i);
         } catch (Exception e) {
             try {
-                startActivity(new Intent(Settings.ACTION_SETTINGS));
+                // не ACTION_SETTINGS: в Vanks OS его открывают эти же настройки
+                startActivity(new Intent().setClassName("com.android.settings", "com.android.settings.Settings"));
             } catch (Exception e2) {
                 toast("Не удалось открыть");
             }
+        }
+    }
+
+    /** Строка раздела настроек Android — только если он есть на этом телефоне. */
+    private void sysRow(Group g, int color, Icon icon, String title, String sub, String action) {
+        Intent i = new Intent(action);
+        if (getPackageManager().resolveActivity(i, 0) == null) return;
+        add(g, row(color, icon, title, sub, null, () -> open(i)));
+    }
+
+    /**
+     * Vanks OS: «Настройки» одни. Системные «Настройки» (шестерёнка в чужих
+     * приложениях, ACTION_SETTINGS) открывают эти; разделы Android открываются
+     * из них. На обычном телефоне ничего не перехватываем.
+     */
+    static void sync(android.content.Context c) {
+        int want = Updater.osVersion() != null ? android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                : android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT;
+        android.content.ComponentName cn = new android.content.ComponentName(c, "os.vanks.launcher.SettingsOs");
+        android.content.pm.PackageManager pm = c.getPackageManager();
+        try {
+            if (pm.getComponentEnabledSetting(cn) != want)
+                pm.setComponentEnabledSetting(cn, want, android.content.pm.PackageManager.DONT_KILL_APP);
+        } catch (RuntimeException ignored) {
         }
     }
 
@@ -510,6 +535,9 @@ public final class SettingsActivity extends Activity {
         add(net, btRow);
         add(net, row(GREEN, Glyph::signal, "Сеть и интернет", "SIM, мобильные данные", null, () -> open(Settings.ACTION_WIRELESS_SETTINGS)));
         add(net, row(ORANGE, Glyph::plane, "Авиарежим", null, null, () -> open(Settings.ACTION_AIRPLANE_MODE_SETTINGS)));
+        sysRow(net, GREEN, Glyph::hotspot, "Точка доступа", "Раздать интернет", "android.settings.TETHER_SETTINGS");
+        sysRow(net, INDIGO, Glyph::vpn, "VPN", null, Settings.ACTION_VPN_SETTINGS);
+        sysRow(net, BLUE, Glyph::bluetooth, "Подключённые устройства", "NFC, печать, трансляция", "android.settings.CONNECTED_DEVICES_SETTINGS");
         mainGroups.add(net);
 
         Group snd = group(col, "Звук и уведомления", null);
@@ -531,12 +559,27 @@ public final class SettingsActivity extends Activity {
         add(priv, row(BLUE, Glyph::shield, "Конфиденциальность", null, null, () -> open(Settings.ACTION_PRIVACY_SETTINGS)));
         add(priv, row(GREY, (c, x, y, s, col2) -> Glyph.lock(c, x, y, s, col2, false), "Безопасность", "PIN-код, отпечатки Android", null,
                 () -> open(Settings.ACTION_SECURITY_SETTINGS)));
+        sysRow(priv, GREEN, Glyph::pin, "Местоположение", "GPS, кому можно", Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+        sysRow(priv, BLUE, Glyph::shield, "Пароли и аккаунты", "Google, синхронизация", Settings.ACTION_SYNC_SETTINGS);
+        sysRow(priv, RED, Glyph::bell, "Экстренные случаи", "SOS, медицинские данные", "android.settings.EMERGENCY_SETTINGS");
         mainGroups.add(priv);
 
+        Group help = group(col, "Помощь", null);
+        sysRow(help, INDIGO, Glyph::swipe, "Специальные возможности", "Экранный диктор, размер текста", Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        sysRow(help, GREEN, Glyph::alarm, "Цифровое благополучие", "Экранное время, режим сна", "com.google.android.apps.wellbeing.SETTINGS_ENTRY");
+        mainGroups.add(help);
+
         Group sys = group(col, "Система", null);
+        sysRow(sys, BLUE, Glyph::search, "Язык и ввод", "Клавиатура, голосовой ввод", Settings.ACTION_LOCALE_SETTINGS);
+        sysRow(sys, ORANGE, Glyph::alarm, "Дата и время", null, Settings.ACTION_DATE_SETTINGS);
+        sysRow(sys, INDIGO, Glyph::phone, "Пользователи", null, "android.settings.USER_SETTINGS");
+        sysRow(sys, GREY, Glyph::sliders, "Для разработчиков", null, Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS);
         add(sys, row(GREY, Glyph::phone, "Лаунчер по умолчанию", "Чтобы «домой» открывал Vanks", null, () -> open(Settings.ACTION_HOME_SETTINGS)));
         add(sys, row(GREY, Glyph::info, "О телефоне", null, null, () -> open(Settings.ACTION_DEVICE_INFO_SETTINGS)));
-        add(sys, row(GREY, Glyph::gear, "Все настройки Android", null, null, () -> open(Settings.ACTION_SETTINGS)));
+        // Vanks OS: «Настройки» одни — главная страница Android здесь не нужна,
+        // всё, что на ней было, есть выше; оставлена для редкого
+        add(sys, row(GREY, Glyph::gear, Updater.osVersion() != null ? "Остальные настройки" : "Все настройки Android", null, null,
+                () -> open(new Intent().setClassName("com.android.settings", "com.android.settings.Settings"))));
         mainGroups.add(sys);
 
         refreshMain();

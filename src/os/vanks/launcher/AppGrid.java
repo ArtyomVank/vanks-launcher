@@ -139,6 +139,15 @@ final class AppGrid extends View {
         return Ui.toWindow(this, out);
     }
 
+    /** Где на экране значок пакета (с масштабом); нет в ряду — null. */
+    RectF rectOf(String pkg) {
+        for (int i = 0; i < apps.size(); i++) {
+            Apps.App a = apps.get(i);
+            if (a.cn != null && pkg.equals(a.cn.getPackageName())) return screenRect(i);
+        }
+        return null;
+    }
+
     private int hit(float x, float y) {
         float cw = (getWidth() - getPaddingLeft() - getPaddingRight()) / (float) cols;
         int col = (int) ((x - getPaddingLeft()) / cw);
@@ -196,7 +205,7 @@ final class AppGrid extends View {
             c.save();
             c.scale(sc, sc, r.centerX(), r.centerY());
             bmp.setAlpha(Math.round(255 * al));
-            if (a.bmp != null) c.drawBitmap(a.bmp, null, r, bmp);
+            if (a.bmp != null && !Home.flyingTo(a)) c.drawBitmap(a.bmp, null, r, bmp);
             c.restore();
             if (labels) {
                 label.setAlpha(Math.round(255 * al));
