@@ -2644,9 +2644,11 @@ public final class CameraActivity extends Activity implements TextureView.Surfac
 
     private void openLast() {
         if (recording) return;
+        // своя галерея: последний снимок сразу открыт, листается к остальным
         Intent i = lastUri != null
                 ? new Intent(Intent.ACTION_VIEW).setDataAndType(lastUri, lastMime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                : new Intent(Intent.ACTION_VIEW, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                : new Intent(Intent.ACTION_MAIN);
+        i.setClass(this, GalleryActivity.class);
         try {
             startActivity(i);
         } catch (RuntimeException e) {

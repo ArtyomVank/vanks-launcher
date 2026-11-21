@@ -123,13 +123,18 @@ public final class LockService extends Service {
             Prefs.load(c);
             sync(c);
             EdgeService.sync(c);
+            Windows.enable(c);
             if (Updater.osVersion() != null) {
                 // Vanks OS: системного замка нет — свой экран сразу после включения,
                 // и жесты (системной панели навигации тоже нет)
                 if (Prefs.navGestures) VanksAccess.enable(c);
                 // уведомления — в шторке Vanks (системной в Vanks OS нет)
                 VanksNotes.enable(c);
-                if (Prefs.lockMain && canOpen(c)) LockActivity.show(c);
+                // с PIN-кодом BOOT_COMPLETED приходит уже после системного ввода
+                // (без него Android не расшифрует данные) — второй замок не нужен
+                android.app.KeyguardManager km = c.getSystemService(android.app.KeyguardManager.class);
+                boolean secure = km != null && km.isDeviceSecure();
+                if (Prefs.lockMain && canOpen(c) && !secure) LockActivity.show(c);
             }
             // на обычном телефоне после включения он уже открыт системным
             // замком — свой экран покажется при следующем выключении экрана

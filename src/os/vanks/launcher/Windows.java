@@ -21,7 +21,24 @@ final class Windows {
     static final String HOW = "Включите в «Для разработчиков»: «Окна произвольной формы» "
             + "и «Изменение размера в многооконном режиме», затем перезагрузите телефон";
 
+    /**
+     * Vanks OS (и телефон, где выдано WRITE_SECURE_SETTINGS): включить окна
+     * самим — Android подхватывает настройку без перезагрузки.
+     */
+    static void enable(Context c) {
+        if (c.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) != PackageManager.PERMISSION_GRANTED) return;
+        ContentResolver r = c.getContentResolver();
+        try {
+            if (Settings.Global.getInt(r, "enable_freeform_support", 0) == 0)
+                Settings.Global.putInt(r, "enable_freeform_support", 1);
+            if (Settings.Global.getInt(r, "force_resizable_activities", 0) == 0)
+                Settings.Global.putInt(r, "force_resizable_activities", 1);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
     static boolean supported(Context c) {
+        enable(c);
         if (c.getPackageManager().hasSystemFeature(PackageManager.FEATURE_FREEFORM_WINDOW_MANAGEMENT)) return true;
         ContentResolver r = c.getContentResolver();
         return Settings.Global.getInt(r, "enable_freeform_support", 0) != 0

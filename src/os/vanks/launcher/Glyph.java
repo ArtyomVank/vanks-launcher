@@ -35,6 +35,29 @@ final class Glyph {
         }
     }
 
+    /** Лицо в рамке сканера: уголки, глаза, улыбка; sweep — бегущая линия (0…1, 1 — без неё). */
+    static void face(Canvas c, float cx, float cy, float s, int color, float sweep) {
+        Paint q = stroke(color, s);
+        q.setStrokeWidth(Math.max(1.5f, s * 0.07f));
+        float h = s * 0.46f, k = s * 0.16f;
+        for (int sx = -1; sx <= 1; sx += 2)
+            for (int sy = -1; sy <= 1; sy += 2) {
+                float x = cx + sx * h, y = cy + sy * h;
+                c.drawLine(x, y, x - sx * k, y, q);
+                c.drawLine(x, y, x, y - sy * k, q);
+            }
+        float e = s * 0.13f;
+        c.drawLine(cx - e, cy - s * 0.12f, cx - e, cy - s * 0.04f, q);
+        c.drawLine(cx + e, cy - s * 0.12f, cx + e, cy - s * 0.04f, q);
+        r.set(cx - s * 0.16f, cy - s * 0.02f, cx + s * 0.16f, cy + s * 0.2f);
+        c.drawArc(r, 20, 140, false, q);
+        if (sweep < 1f) {
+            float y = cy - h + 2 * h * sweep;
+            q.setAlpha(Math.round(q.getAlpha() * 0.6f));
+            c.drawLine(cx - h * 0.8f, y, cx + h * 0.8f, y, q);
+        }
+    }
+
     static void wifi(Canvas c, float cx, float cy, float s, int color) {
         Paint q = stroke(color, s);
         for (int i = 1; i <= 3; i++) {

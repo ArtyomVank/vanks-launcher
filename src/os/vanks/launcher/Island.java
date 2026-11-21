@@ -48,7 +48,7 @@ final class Island extends View {
         Drawable icon;
         Bitmap art;
         float progress = -1;   // 0…1, −1 — нет
-        boolean playing;
+        boolean playing, face;   // face — сканер лица, а не пальца
         int tint = 0xFF34C759;
         PendingIntent open;
         MediaController media;
@@ -336,10 +336,12 @@ final class Island extends View {
                 if (it.state == SCAN_OK) check(c, ix, cy, d * 0.62f, Ui.alpha(col, ca));
                 else {
                     float sweep = it.state == SCANNING ? (SystemClock.uptimeMillis() % 1400) / 1400f : 1f;
-                    Glyph.fingerprint(c, ix, cy, d * 0.8f, Ui.alpha(col, ca), sweep);
+                    if (it.face) Glyph.face(c, ix, cy, d * 0.8f, Ui.alpha(col, ca), it.state == SCANNING ? sweep : 1f);
+                    else Glyph.fingerprint(c, ix, cy, d * 0.8f, Ui.alpha(col, ca), sweep);
                 }
                 badge.setColor(Ui.alpha(it.state == SCAN_MISS ? 0xFFFF6B60 : 0xFFFFFFFF, ca));
-                c.drawText(it.state == SCAN_OK ? "Готово" : it.state == SCAN_MISS ? "Не тот палец" : "Сканирую…", ex, cy + Ui.dpf(4.5f), badge);
+                String miss = it.face ? "Не узнал" : "Не тот палец", busy = it.face ? "Узнаю лицо…" : "Сканирую…";
+                c.drawText(it.state == SCAN_OK ? "Готово" : it.state == SCAN_MISS ? miss : busy, ex, cy + Ui.dpf(4.5f), badge);
                 break;
             }
             case VOLUME: {
@@ -374,6 +376,7 @@ final class Island extends View {
         boolean player = it.kind == MEDIA || it.kind == VOICE;
         float right = r.right - pad - (player ? Ui.dpf(92) : 0);
         if (it.kind == VOLUME) Glyph.speaker(c, ix, iy, d * 0.5f, Ui.alpha(0xFFFFFFFF, ca));
+        else if (it.kind == SCAN && it.face) Glyph.face(c, ix, iy, d * 0.7f, Ui.alpha(Ui.accentLight(), ca), 1f);
         else if (it.kind == SCAN) Glyph.fingerprint(c, ix, iy, d * 0.7f, Ui.alpha(Ui.accentLight(), ca), 1f);
         else icon(c, it, ix, iy, d, al);
         float tx = r.left + pad + d + Ui.dpf(12), tw = right - tx;

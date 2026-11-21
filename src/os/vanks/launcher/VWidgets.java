@@ -1,9 +1,12 @@
 package os.vanks.launcher;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.text.TextPaint;
+import android.text.TextUtils;
 import android.view.View;
 
 import java.text.SimpleDateFormat;
@@ -144,7 +147,7 @@ final class VWidgets {
             case "music": {
                 float[] b = musicButtons(it, r);
                 for (int i = 0; i < 3; i++)
-                    if (Math.hypot(x - b[i], y - b[3]) < Ui.dpf(26)) return i == 0 ? "prev" : i == 1 ? "play" : "next";
+                    if (Math.hypot(x - b[i], y - b[3]) < Math.min(Ui.dpf(26), (b[1] - b[0]) * 0.55f)) return i == 0 ? "prev" : i == 1 ? "play" : "next";
                 return null;
             }
             case "timer": {
@@ -167,42 +170,64 @@ final class VWidgets {
 
     // ── музыка ────────────────────────────────────────────────────────────
 
-    /** x назад, x играть, x вперёд, y. */
+    /** x назад, x играть, x вперёд, y. Кнопки — у правого края, шаг по ширине виджета. */
     private static float[] musicButtons(Layout.Item it, RectF r) {
         boolean wide = r.width() > r.height() * 1.6f;
-        if (wide && it.h > 1) return new float[]{r.right - Ui.dpf(132), r.right - Ui.dpf(82), r.right - Ui.dpf(32), r.bottom - Ui.dpf(34)};
-        if (wide) return new float[]{r.right - Ui.dpf(124), r.right - Ui.dpf(78), r.right - Ui.dpf(32), r.centerY()};
-        float cx = r.centerX(), s = Math.min(Ui.dpf(46), r.width() / 3.2f);
-        return new float[]{cx - s, cx, cx + s, r.bottom - Ui.dpf(30)};
+        float step = Math.min(Ui.dpf(44), r.width() / (wide ? 7.5f : 3.4f));
+        if (wide) {
+            float next = r.right - Ui.dpf(14) - Ui.dpf(16);
+            float y = it.h > 1 ? r.bottom - Ui.dpf(34) : r.centerY();
+            return new float[]{next - 2 * step, next - step, next, y};
+        }
+        float cx = r.centerX();
+        return new float[]{cx - step, cx, cx + step, r.bottom - Ui.dpf(30)};
     }
+
+    private static final Paint artPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private static final TextPaint mt1 = new TextPaint(Paint.ANTI_ALIAS_FLAG), mt2 = new TextPaint(Paint.ANTI_ALIAS_FLAG);
 
     private static void music(Canvas c, Layout.Item it, RectF r) {
         int fg = Look.fg();
         float pad = Ui.dpf(14);
         boolean wide = r.width() > r.height() * 1.6f;
-        float s = Math.min(Ui.dpf(it.h > 1 ? 56 : 40), r.height() - pad * 2);
-        float cy = it.h > 1 ? r.top + pad + s / 2 : r.centerY();
-        RectF cover = new RectF(r.left + pad, cy - s / 2, r.left + pad + s, cy + s / 2);
-        if (!wide) cover.offsetTo(r.left + pad, r.top + pad);
-        p.setStyle(Paint.Style.FILL);
-        p.setShader(new android.graphics.LinearGradient(cover.left, cover.top, cover.right, cover.bottom, Ui.accentLight(), Ui.accentDark(), android.graphics.Shader.TileMode.CLAMP));
-        c.drawRoundRect(cover, s * 0.24f, s * 0.24f, p);
-        p.setShader(null);
-        Glyph.speaker(c, cover.centerX(), cover.centerY(), s * 0.55f, 0xFFFFFFFF);
-        Paint t1 = Ui.text(Ui.bold, 15, fg), t2 = Ui.text(Ui.regular, 13, Look.fg2());
-        float tx = cover.right + Ui.dpf(12);
-        if (wide) {
-            float ty = it.h > 1 ? cover.centerY() : r.centerY();
-            c.drawText(playing ? "Играет" : "На паузе", tx, ty - Ui.dpf(2), t1);
-            c.drawText("Музыка", tx, ty + Ui.dpf(16), t2);
-        } else {
-            c.drawText(playing ? "Играет" : "Пауза", tx, cover.centerY() + Ui.dpf(5), t1);
-        }
         float[] b = musicButtons(it, r);
-        float bs = Ui.dpf(22);
+        float step = b[1] - b[0];
+        float s = Math.min(Ui.dpf(it.h > 1 ? 56 : 40), r.height() - pad * 2);
+        if (!wide) s = Math.min(s, r.height() - Ui.dpf(70));
+        float cy = wide && it.h == 1 ? r.centerY() : r.top + pad + s / 2;
+        RectF cover = new RectF(r.left + pad, cy - s / 2, r.left + pad + s, cy + s / 2);
+        Bitmap art = VanksNotes.nowArt;
+        if (art != null && !art.isRecycled()) {
+            Ui.drawCover(c, art, cover, s * 0.24f, artPaint, 1f);
+        } else {
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new android.graphics.LinearGradient(cover.left, cover.top, cover.right, cover.bottom, Ui.accentLight(), Ui.accentDark(), android.graphics.Shader.TileMode.CLAMP));
+            c.drawRoundRect(cover, s * 0.24f, s * 0.24f, p);
+            p.setShader(null);
+            Glyph.speaker(c, cover.centerX(), cover.centerY(), s * 0.55f, 0xFFFFFFFF);
+        }
+        // текст — от обложки до кнопок (в узком ряду) или до края; не влезает — многоточие
+        String title = VanksNotes.nowTitle != null ? VanksNotes.nowTitle : playing ? "Играет" : "На паузе";
+        String sub = VanksNotes.nowTitle != null ? VanksNotes.nowArtist : "Музыка";
+        mt1.set(Ui.text(Ui.bold, 15, fg));
+        mt2.set(Ui.text(Ui.regular, 13, Look.fg2()));
+        float tx = cover.right + Ui.dpf(10);
+        float right = wide && it.h == 1 ? b[0] - step * 0.5f - Ui.dpf(4) : r.right - pad;
+        float tw = right - tx;
+        if (tw > Ui.dpf(36)) {
+            float ty = cover.centerY();
+            CharSequence t1 = TextUtils.ellipsize(title, mt1, tw, TextUtils.TruncateAt.END);
+            if (sub != null && (wide || s >= Ui.dpf(44))) {
+                CharSequence t2 = TextUtils.ellipsize(sub, mt2, tw, TextUtils.TruncateAt.END);
+                c.drawText(t1, 0, t1.length(), tx, ty - Ui.dpf(2), mt1);
+                c.drawText(t2, 0, t2.length(), tx, ty + Ui.dpf(16), mt2);
+            } else c.drawText(t1, 0, t1.length(), tx, ty + Ui.dpf(5), mt1);
+        }
+        float bs = Math.min(Ui.dpf(22), step * 0.5f);
         Glyph.skip(c, b[0], b[3], bs, fg, false);
+        p.setStyle(Paint.Style.FILL);
         p.setColor(Ui.alpha(fg, 0.14f));
-        c.drawCircle(b[1], b[3], Ui.dpf(21), p);
+        c.drawCircle(b[1], b[3], Math.min(Ui.dpf(21), step * 0.48f), p);
         Glyph.play(c, b[1], b[3], bs * 1.1f, fg, playing);
         Glyph.skip(c, b[2], b[3], bs, fg, true);
     }

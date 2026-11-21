@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Галерея: две карточки-снимка, на передней — холмы и солнце. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#66FFFFFF"
+        android:pathData="M40,32 L74,32 C77.3,32 80,34.7 80,38 L80,64 L76,64 L76,40 C76,37.8 74.2,36 72,36 L34,36 C34.9,33.7 37.2,32 40,32 Z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M34,40 L68,40 C71.3,40 74,42.7 74,46 L74,70 C74,73.3 71.3,76 68,76 L34,76 C30.7,76 28,73.3 28,70 L28,46 C28,42.7 30.7,40 34,40 Z" />
+    <path android:fillColor="#FF5B47D6"
+        android:pathData="M32,72 L44,57 L52,66 L58,60 L70,72 Z" />
+    <path android:fillColor="#FFFFB938"
+        android:pathData="M61,50 m-4.5,0 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0" />
+</vector>

@@ -1011,6 +1011,14 @@ public final class VanksAccess extends AccessibilityService {
             return;
         }
         cover = v;
+        // остров (сканер лица) — над занавесом: окно, добавленное позже, ложится выше
+        if (island != null && islandLp != null) {
+            try {
+                wm.removeView(island);
+                wm.addView(island, islandLp);
+            } catch (Exception ignored) {
+            }
+        }
         ui.postDelayed(dropCover, ms);
     }
 

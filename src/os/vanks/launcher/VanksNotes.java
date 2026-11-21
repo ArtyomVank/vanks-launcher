@@ -245,11 +245,16 @@ public final class VanksNotes extends NotificationListenerService {
         }
     }
 
+    /** Последний трек (для виджета «Музыка» на столе): название, исполнитель, обложка. */
+    static volatile String nowTitle, nowArtist;
+    static volatile Bitmap nowArt;
+
     private void media(MediaController mc) {
         String pkg = mc.getPackageName(), key = "m:" + pkg;
         PlaybackState st = mc.getPlaybackState();
         int s = st != null ? st.getState() : PlaybackState.STATE_NONE;
         boolean playing = s == PlaybackState.STATE_PLAYING || s == PlaybackState.STATE_BUFFERING;
+        if (playing || nowTitle == null) remember(mc, pkg);
         Island.Item was = Island.get(key);
         if (!Prefs.islandMedia || !playing && was == null) {
             if (!Prefs.islandMedia) Island.remove(key);
@@ -284,6 +289,20 @@ public final class VanksNotes extends NotificationListenerService {
         // на паузе — ещё 5 секунд, потом уходит
         if (!playing) it.until = SystemClock.uptimeMillis() + 5000;
         Island.put(it);
+    }
+
+    private void remember(MediaController mc, String pkg) {
+        MediaMetadata md = mc.getMetadata();
+        if (md == null || TELEGRAM.contains(pkg)) return;
+        String t = md.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE);
+        if (t == null) t = md.getString(MediaMetadata.METADATA_KEY_TITLE);
+        if (t == null || t.isEmpty()) return;
+        String a = md.getString(MediaMetadata.METADATA_KEY_ARTIST);
+        Bitmap art = md.getBitmap(MediaMetadata.METADATA_KEY_ART);
+        if (art == null) art = md.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+        nowTitle = t;
+        nowArtist = a != null && !a.isEmpty() ? a : label(pkg);
+        nowArt = art;
     }
 
     /** Играет ли у Telegram своя сессия (тогда угадывать по звуку не нужно). */

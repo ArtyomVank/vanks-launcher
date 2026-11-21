@@ -2832,7 +2832,7 @@ public final class SettingsActivity extends Activity {
             Prefs.ctrlRight = i == 0;
             save();
         }));
-        Group o = group(col, null, "Если выключить, свайп вниз посередине ничего не делает — поиск остаётся под кнопкой «Поиск» над доком.");
+        Group o = group(col, null, "Выключено — свайп вниз по столу и доку открывает уведомления, как на большинстве Android. Поиск остаётся под кнопкой «Поиск» над доком.");
         add(o, toggleRow(BLUE, Glyph::search, "Свайп вниз — поиск", null, Prefs.swipeSearch, on -> {
             Prefs.swipeSearch = on;
             save();

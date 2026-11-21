@@ -274,22 +274,20 @@ public final class EdgeService extends Service {
         if (animate) p.hide(remove); else remove.run();
     }
 
-    private void launch(Apps.App a, RectF r, boolean window) {
-        View from = panel;   // окно растёт из значка в панели (она ещё видна, пока уезжает)
+    private void launch(Apps.App a, boolean window) {
         closePanel(true);
         Feel.sound(this, "app-open");
         if (window) {
             Windows.open(this, a);
             return;
         }
+        // без makeScaleUpAnimation: из уезжающей панели Android растягивал
+        // заставку приложения на всю панель (огромный значок поверх всего)
         Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(a.cn)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         try {
-            android.os.Bundle o = r == null ? null : ActivityOptions.makeScaleUpAnimation(from != null ? from : handle,
-                    Math.round(r.left), Math.round(r.top), Math.round(r.width()), Math.round(r.height())).toBundle();
-            startActivity(i, o);
-        } catch (Exception e) {
-            try { startActivity(i); } catch (Exception ignored) {}
+            startActivity(i);
+        } catch (Exception ignored) {
         }
     }
 
@@ -373,20 +371,32 @@ public final class EdgeService extends Service {
             grid.listener = new AppGrid.Listener() {
                 @Override
                 public void tap(Apps.App a, AppGrid g, RectF rr) {
-                    if (a != null) launch(a, rr, Prefs.edgeWindow);
+                    if (a != null) launch(a, Prefs.edgeWindow);
                 }
 
                 @Override
                 public void longPress(Apps.App a, AppGrid g, RectF rr) {
                     // удержание — наоборот: в окне, если обычно во весь экран, и наоборот
-                    if (a != null) launch(a, rr, !Prefs.edgeWindow);
+                    if (a != null) launch(a, !Prefs.edgeWindow);
                 }
             };
-            card.addView(grid, new LinearLayout.LayoutParams(-1, -2));
+            // лёжа два столбца не влезают по высоте — столбцов столько, чтобы
+            // уместились все; если и так мало места — листается
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            float cell = Apps.iconPx + Ui.dpf(32) + grid.rowGap;
+            int fitRows = Math.max(1, (int) ((dm.heightPixels - Ui.dpf(44 + 20 + 40)) / cell));
+            int n = grid.apps.size();
+            grid.cols = Math.max(2, Math.min(5, (n + fitRows - 1) / fitRows));
+            android.widget.ScrollView scroll = new android.widget.ScrollView(c);
+            scroll.setVerticalScrollBarEnabled(false);
+            scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+            scroll.addView(grid, new FrameLayout.LayoutParams(-1, -2));
+            card.addView(scroll, new LinearLayout.LayoutParams(-1, -2));
 
-            int cw = Math.round(2 * (Apps.iconPx + Ui.dpf(34)) + Ui.dpf(12));
+            int cw = Math.round(grid.cols * (Apps.iconPx + Ui.dpf(34)) + Ui.dpf(12));
             LayoutParams lp = new LayoutParams(cw, -2, (Prefs.edgeLeft ? Gravity.LEFT : Gravity.RIGHT) | Gravity.CENTER_VERTICAL);
             lp.leftMargin = lp.rightMargin = Ui.dp(10);
+            lp.topMargin = lp.bottomMargin = Ui.dp(20);
             addView(card, lp);
         }
 

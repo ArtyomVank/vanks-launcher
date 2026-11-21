@@ -213,7 +213,9 @@ public final class LockActivity extends Activity {
         }
         Island.Item it = new Island.Item("scan", Island.SCAN);
         it.state = state;
-        it.title = "Отпечаток";
+        // без датчика отпечатка сканирует лицо (своё или системное под занавесом)
+        it.face = !lock.sensor;
+        it.title = it.face ? "Лицо" : "Отпечаток";
         Island.put(it);
     }
 

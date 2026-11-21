@@ -90,6 +90,9 @@ final class QsTiles {
      * быстрых настройках, поэтому сначала добавляем (повторно — не страшно).
      * false — нажать не вышло: открываем само приложение.
      */
+    /** Плитки, уже добавленные в быстрые настройки системы за этот запуск. */
+    private static final HashSet<String> added = new HashSet<>();
+
     static boolean click(Context c, String type) {
         Entry e = get(type);
         if (e == null) return false;
@@ -97,11 +100,23 @@ final class QsTiles {
                 && c.checkSelfPermission("android.permission.STATUS_BAR") == PackageManager.PERMISSION_GRANTED) {
             try {
                 Object sb = c.getSystemService("statusbar");
-                sb.getClass().getMethod("addTile", ComponentName.class).invoke(sb, e.cn);
-                sb.getClass().getMethod("clickTile", ComponentName.class).invoke(sb, e.cn);
+                java.lang.reflect.Method click = sb.getClass().getMethod("clickTile", ComponentName.class);
+                if (added.add(e.type)) {
+                    // плитки ещё нет в быстрых настройках: система добавляет её не сразу,
+                    // и нажатие до этого уходит в пустоту — жмём, когда она появится
+                    sb.getClass().getMethod("addTile", ComponentName.class).invoke(sb, e.cn);
+                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                        try { click.invoke(sb, e.cn); } catch (ReflectiveOperationException | RuntimeException ignored) {}
+                    }, 450);
+                } else click.invoke(sb, e.cn);
                 return true;
             } catch (ReflectiveOperationException | RuntimeException ignored) {
             }
+        }
+        // VPN без плитки в системе не включить — его страница, а не само приложение
+        if (e.vpn) {
+            Tiles.start(c, new Intent("android.settings.VPN_SETTINGS"));
+            return false;
         }
         Intent i = c.getPackageManager().getLaunchIntentForPackage(e.cn.getPackageName());
         if (i != null) Tiles.start(c, i);

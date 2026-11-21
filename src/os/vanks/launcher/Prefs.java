@@ -35,7 +35,7 @@ final class Prefs {
     static boolean wallAnimate = false;  // живые и супер обои двигаются и на столе (тратит батарею)
     static boolean depth = true;
     static boolean fingerprint = true;
-    static boolean swipeSearch = true;
+    static boolean swipeSearch = false;   // свайп вниз по столу: поиск или (по умолчанию) уведомления
     static int hz = 0;                  // частота экрана окон Vanks: 0 — максимальная
     static float gestSens = 1f;         // чувствительность свайпов: 0,6 — нужен длинный свайп, 1,6 — короткий
     static float gestTop = 0.33f;       // высота верхней зоны (пункт управления, уведомления)
@@ -62,7 +62,7 @@ final class Prefs {
     static String icons = "vanks";       // значки: vanks / system / pack:<пакет>
     static boolean edge = false;         // боковая панель (поверх других приложений)
     static boolean edgeLeft = false;
-    static boolean edgeWindow = false;   // из панели — в плавающем окне
+    static boolean edgeWindow = true;   // из панели — в плавающем окне
     static ArrayList<String> edgeApps = new ArrayList<>();
     // экран блокировки: свои обои ("" — те же, что на столе) и часы, как на ПК
     static String lockWallpaper = "";
@@ -117,7 +117,9 @@ final class Prefs {
         wallpaper = sp.getString("wallpaper", "peak");
         depth = sp.getBoolean("depth", true);
         fingerprint = sp.getBoolean("fingerprint", true);
-        swipeSearch = sp.getBoolean("swipeSearch", true);
+        swipeSearch = sp.getBoolean("swipeSearch", false);
+        // 1.0: свайп вниз по столу и доку — уведомления, как на большинстве Android
+        if (sp.getInt("swipeV", 0) < 1) swipeSearch = false;
         hz = sp.getInt("hz", 0);
         gestSens = sp.getFloat("gestSens", 1f);
         gestTop = sp.getFloat("gestTop", 0.33f);
@@ -150,7 +152,9 @@ final class Prefs {
         icons = sp.getString("icons", "vanks");
         edge = sp.getBoolean("edge", false);
         edgeLeft = sp.getBoolean("edgeLeft", false);
-        edgeWindow = sp.getBoolean("edgeWindow", false);
+        edgeWindow = sp.getBoolean("edgeWindow", true);
+        // 1.0: из панели — окном у всех (человек просил так по умолчанию)
+        if (sp.getInt("edgeWindowV", 0) < 1) edgeWindow = true;
         edgeApps = split(sp.getString("edgeApps", ""));
         lockWallpaper = sp.getString("lockWallpaper", "");
         lockClock = sp.getString("lockClock", "");
@@ -212,6 +216,7 @@ final class Prefs {
                 .putBoolean("depth", depth)
                 .putBoolean("fingerprint", fingerprint)
                 .putBoolean("swipeSearch", swipeSearch)
+                .putInt("swipeV", 1)
                 .putBoolean("swipeHintSeen", swipeHintSeen)
                 .putString("tiles", tiles)
                 .putString("home", String.join("|", home))
@@ -224,6 +229,7 @@ final class Prefs {
                 .putBoolean("edge", edge)
                 .putBoolean("edgeLeft", edgeLeft)
                 .putBoolean("edgeWindow", edgeWindow)
+                .putInt("edgeWindowV", 1)
                 .putString("edgeApps", String.join("|", edgeApps))
                 .putString("lockWallpaper", lockWallpaper)
                 .putString("lockClock", lockClock)

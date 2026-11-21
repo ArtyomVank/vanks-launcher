@@ -1847,7 +1847,7 @@ public final class Home extends Activity {
 
     /**
      * Корень: жесты главного экрана. Вниз в верхней трети справа — пункт управления,
-     * слева — уведомления; вниз ниже — поиск; влево и вправо — рабочие столы.
+     * слева и ниже (и с дока) — уведомления, или поиск, если он выбран; влево и вправо — рабочие столы.
      */
     private final class Root extends FrameLayout {
         private static final int NONE = 0, CONTROL = 1, PAGE = 2, SEARCH = 3;
@@ -1903,11 +1903,12 @@ public final class Home extends Activity {
                     if (Updater.osVersion() != null && Shade.open(true)) return NONE;
                     return CONTROL;
                 }
-                if (top) {
+                if (top || !Prefs.swipeSearch) {
+                    // и ниже, и с дока — уведомления (поиск — если выбран в настройках)
                     expandNotifications();
                     return NONE;
                 }
-                return Prefs.swipeSearch ? SEARCH : NONE;
+                return SEARCH;
             }
             return NONE;
         }
