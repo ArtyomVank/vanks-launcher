@@ -113,13 +113,132 @@ final class QsTiles {
             } catch (ReflectiveOperationException | RuntimeException ignored) {
             }
         }
-        // VPN без плитки в системе не включить — его страница, а не само приложение
-        if (e.vpn) {
-            Tiles.start(c, new Intent("android.settings.VPN_SETTINGS"));
-            return false;
-        }
+        if (e.vpn) return vpnFallback(c, e);
+        openApp(c, e);
+        return false;
+    }
+
+    private static void openApp(Context c, Entry e) {
         Intent i = c.getPackageManager().getLaunchIntentForPackage(e.cn.getPackageName());
         if (i != null) Tiles.start(c, i);
+    }
+
+    // ── VPN на обычном телефоне ──────────────────────────────────────────
+    //
+    // Нажать плитку чужого приложения может только система. Без неё VPN
+    // переключаем так, чтобы приложение осталось в фоне:
+    //   1) ярлык приложения «Подключить» / «Отключить» / «Переключить»
+    //      (v2rayNG, Hiddify, NekoBox и др.; Vanks — лаунчер по умолчанию);
+    //   2) его плитка в шторке Android — нажимает служба «Vanks: жесты и вход»
+    //      и сразу закрывает шторку;
+    //   3) иначе — само приложение (не страница VPN в настройках).
+
+    /** true — переключаем в фоне (пункт управления не закрывать), false — открыли приложение. */
+    private static boolean vpnFallback(Context c, Entry e) {
+        boolean on = vpnOn(c);
+        if (vpnShortcut(c, e, on)) return true;
+        VanksAccess a = VanksAccess.on;
+        if (a != null) {
+            a.clickQsTile(e.label, e.app, () -> openApp(c, e));
+            return true;
+        }
+        openApp(c, e);
         return false;
+    }
+
+    static boolean vpnOn(Context c) {
+        try {
+            android.net.ConnectivityManager cm = c.getSystemService(android.net.ConnectivityManager.class);
+            for (android.net.Network n : cm.getAllNetworks()) {
+                android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(n);
+                if (nc != null && nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)) return true;
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return false;
+    }
+
+    private static final java.util.regex.Pattern OFF = java.util.regex.Pattern.compile(
+            "disconnect|stop|turn.?off|\\boff\\b|отключ|выключ|останов|разъедин");
+    private static final java.util.regex.Pattern ON = java.util.regex.Pattern.compile(
+            "connect|start|turn.?on|\\bon\\b|подключ|включ|запуст|соедин");
+    private static final java.util.regex.Pattern TOGGLE = java.util.regex.Pattern.compile("toggle|switch|переключ|вкл.?/.?выкл");
+
+    /** Ярлык приложения, что делает нужное: при включённом VPN — отключить, иначе — подключить. */
+    private static boolean vpnShortcut(Context c, Entry e, boolean on) {
+        try {
+            android.content.pm.LauncherApps la = c.getSystemService(android.content.pm.LauncherApps.class);
+            if (la == null || !la.hasShortcutHostPermission()) return false;
+            android.content.pm.LauncherApps.ShortcutQuery q = new android.content.pm.LauncherApps.ShortcutQuery();
+            q.setPackage(e.cn.getPackageName());
+            q.setQueryFlags(android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC
+                    | android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST);
+            java.util.List<android.content.pm.ShortcutInfo> list = la.getShortcuts(q, android.os.Process.myUserHandle());
+            if (list == null) return false;
+            android.content.pm.ShortcutInfo best = null;
+            int bestScore = 0;
+            for (android.content.pm.ShortcutInfo si : list) {
+                if (!si.isEnabled()) continue;
+                String t = (si.getId() + " " + si.getShortLabel() + " " + si.getLongLabel()).toLowerCase(java.util.Locale.ROOT);
+                boolean off = OFF.matcher(t).find(), toggle = TOGGLE.matcher(t).find();
+                boolean onWord = !off && ON.matcher(t).find();
+                int score = toggle ? 2 : on ? (off ? 3 : 0) : (onWord ? 3 : 0);
+                if (score > bestScore) { best = si; bestScore = score; }
+            }
+            if (best == null) return false;
+            la.startShortcut(best.getPackage(), best.getId(), null, null, android.os.Process.myUserHandle());
+            return true;
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    // ── какой VPN включает общая плитка «VPN» ─────────────────────────────
+
+    static java.util.List<Entry> vpns(Context c) {
+        ArrayList<Entry> out = new ArrayList<>();
+        for (Entry e : all(c)) if (e.vpn) out.add(e);
+        return out;
+    }
+
+    static String vpnChoice(Context c) {
+        return c.getSharedPreferences("tiles", Context.MODE_PRIVATE).getString("vpn", "");
+    }
+
+    static void setVpnChoice(Context c, String type) {
+        c.getSharedPreferences("tiles", Context.MODE_PRIVATE).edit().putString("vpn", type).apply();
+    }
+
+    /** Приложение для плитки «VPN»: одно — оно, выбрано — выбранное, иначе null (спросить). */
+    static Entry vpnFor(Context c) {
+        java.util.List<Entry> l = vpns(c);
+        if (l.size() == 1) return l.get(0);
+        String want = vpnChoice(c);
+        for (Entry e : l) if (e.type.equals(want)) return e;
+        return null;
+    }
+
+    /** Спросить, какой VPN включать (один раз; поменять — «Пункт управления» в настройках). */
+    static void askVpn(Context c, java.util.function.Consumer<Entry> picked) {
+        java.util.List<Entry> l = vpns(c);
+        if (l.isEmpty()) return;
+        if (!(c instanceof android.app.Activity)) {
+            setVpnChoice(c, l.get(0).type);
+            picked.accept(l.get(0));
+            return;
+        }
+        String[] names = new String[l.size()];
+        for (int i = 0; i < names.length; i++) {
+            Entry e = l.get(i);
+            names[i] = e.label.equals(e.app) ? e.app : e.app + " · " + e.label;
+        }
+        new android.app.AlertDialog.Builder(c, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Какой VPN включать?")
+                .setItems(names, (d, w) -> {
+                    setVpnChoice(c, l.get(w).type);
+                    picked.accept(l.get(w));
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
     }
 }

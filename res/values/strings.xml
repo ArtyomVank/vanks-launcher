@@ -7,5 +7,6 @@
     <string name="games_name">Игры Vanks</string>
     <string name="camera_name">Камера</string>
     <string name="gallery_name">Галерея</string>
+    <string name="link_name">Delta Link</string>
     <string name="notes_name">Vanks: динамический остров</string>
 </resources>

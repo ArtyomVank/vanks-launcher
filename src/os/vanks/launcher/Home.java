@@ -321,6 +321,14 @@ public final class Home extends Activity {
         if (!Widgets.onResult(this, req, res)) super.onActivityResult(req, res, data);
     }
 
+    @Override
+    public void onWindowFocusChanged(boolean focus) {
+        super.onWindowFocusChanged(focus);
+        // буфер обмена Android даёт прочитать только окну в фокусе — Delta Link
+        // отправляет его компьютеру, когда возвращаются на стол
+        if (focus) Link.clipFromForeground(this);
+    }
+
     /** Стол на экране (между onResume и onPause). */
     private boolean resumedNow;
 
@@ -362,6 +370,8 @@ public final class Home extends Activity {
         wall.setPaused(false);
         lockWall.setPaused(false);
         Updater.maybeCheck(this);
+        // Delta Link: связь с компьютером (если включена)
+        Link.start(this);
         // жесты Vanks включены, а служба нет — включить её самим, если есть право
         // (Vanks OS даёт его системному лаунчеру, иначе — adb pm grant); без
         // права не дёргаем: страницу служб открывает переключатель в настройках
@@ -730,7 +740,7 @@ public final class Home extends Activity {
         }
     }
 
-    private void closeAllLater() {
+    void closeAllLater() {
         ui.postDelayed(() -> {
             if (control.isOpen()) { control.setProgress(0); control.tiles.setEdit(false); }
             if (search.isOpen()) { search.setProgress(0); search.onClosed(); searchMoved(); }

@@ -63,6 +63,7 @@ final class Prefs {
     static boolean edge = false;         // боковая панель (поверх других приложений)
     static boolean edgeLeft = false;
     static boolean edgeWindow = true;   // из панели — в плавающем окне
+    static boolean winFrames = true;    // рамки плавающих окон: скругление, свернуть / на весь экран / закрыть, размер
     static ArrayList<String> edgeApps = new ArrayList<>();
     // экран блокировки: свои обои ("" — те же, что на столе) и часы, как на ПК
     static String lockWallpaper = "";
@@ -155,6 +156,7 @@ final class Prefs {
         edgeWindow = sp.getBoolean("edgeWindow", true);
         // 1.0: из панели — окном у всех (человек просил так по умолчанию)
         if (sp.getInt("edgeWindowV", 0) < 1) edgeWindow = true;
+        winFrames = sp.getBoolean("winFrames", true);
         edgeApps = split(sp.getString("edgeApps", ""));
         lockWallpaper = sp.getString("lockWallpaper", "");
         lockClock = sp.getString("lockClock", "");
@@ -230,6 +232,7 @@ final class Prefs {
                 .putBoolean("edgeLeft", edgeLeft)
                 .putBoolean("edgeWindow", edgeWindow)
                 .putInt("edgeWindowV", 1)
+                .putBoolean("winFrames", winFrames)
                 .putString("edgeApps", String.join("|", edgeApps))
                 .putString("lockWallpaper", lockWallpaper)
                 .putString("lockClock", lockClock)

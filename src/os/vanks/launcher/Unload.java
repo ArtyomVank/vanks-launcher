@@ -37,6 +37,13 @@ final class Unload {
         }
     }
 
+    /** Крестик на рамке окна: выгрузить приложение (без права — через службу, как в «Недавних»). */
+    static void closeWindow(Context c, String pkg) {
+        ActivityManager am = c.getSystemService(ActivityManager.class);
+        if (canForce(c) && force(am, pkg)) return;
+        if (!VanksAccess.forceStop(java.util.Collections.singletonList(pkg))) background(am, pkg);
+    }
+
     /** Смахнули одну карточку: остаёмся в «Недавних». */
     static void one(Context c, String pkg) {
         ActivityManager am = c.getSystemService(ActivityManager.class);

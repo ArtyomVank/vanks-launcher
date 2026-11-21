@@ -97,6 +97,7 @@ public final class VanksNotes extends NotificationListenerService {
         on = this;
         Prefs.load(this);
         Ui.init(this);
+        Link.start(this);
         try {
             for (StatusBarNotification n : getActiveNotifications()) posted(n);
         } catch (RuntimeException ignored) {
@@ -122,12 +123,14 @@ public final class VanksNotes extends NotificationListenerService {
 
     @Override
     public void onNotificationPosted(StatusBarNotification n) {
+        Link.posted(this, n);
         posted(n);
         Shade.changed();
     }
 
     @Override
     public void onNotificationRemoved(StatusBarNotification n) {
+        Link.removed(n);
         Island.remove("n:" + n.getKey());
         Shade.changed();
     }

@@ -155,12 +155,13 @@ final class Tiles {
                 break;
             }
             case "vpn": {
-                // VPN включает плитка его приложения; приложений несколько или нет — настройки VPN
-                QsTiles.Entry only = null;
-                int n = 0;
-                for (QsTiles.Entry e : QsTiles.all(c)) if (e.vpn) { only = e; n++; }
-                if (n == 1) return clickApp(c, only.type, t);
-                return start(c, new Intent("android.settings.VPN_SETTINGS"));
+                // VPN включает плитка его приложения; приложений несколько — один раз
+                // спрашиваем какое (поменять — «Пункт управления» в настройках)
+                if (QsTiles.vpns(c).isEmpty()) return start(c, new Intent("android.settings.VPN_SETTINGS"));
+                QsTiles.Entry pick = QsTiles.vpnFor(c);
+                if (pick != null) return clickApp(c, pick.type, t);
+                QsTiles.askVpn(c, e -> { if (clickApp(c, e.type, t) && c instanceof Home) ((Home) c).closeAllLater(); });
+                return false;
             }
             case "location":
                 if (!Nav.canWrite(c)) return start(c, new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));

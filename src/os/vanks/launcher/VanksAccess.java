@@ -44,6 +44,8 @@ public final class VanksAccess extends AccessibilityService {
     static VanksAccess on;
 
     private WindowManager wm;
+    private WinFrames frames;
+    private final Runnable frameUpdate = () -> { if (frames != null) frames.update(); };
     private Strip bottom, left, right;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -110,6 +112,14 @@ public final class VanksAccess extends AccessibilityService {
         placeIsland();
         listenSound();
         systemShade(false);
+        frames = new WinFrames(this);
+        frames.update();
+    }
+
+    /** Рамки окон: включили или выключили в настройках. */
+    static void framesChanged() {
+        VanksAccess s = on;
+        if (s != null && s.frames != null) s.ui.post(s.frames::update);
     }
 
     /**
@@ -135,6 +145,7 @@ public final class VanksAccess extends AccessibilityService {
         removeAll();
         dropIsland();
         stopSound();
+        if (frames != null) frames.clear();
         if (on == this) on = null;
         return super.onUnbind(i);
     }
@@ -150,6 +161,7 @@ public final class VanksAccess extends AccessibilityService {
         removeAll();
         dropIsland();
         stopSound();
+        if (frames != null) frames.clear();
         if (on == this) on = null;
         super.onDestroy();
     }
@@ -1038,6 +1050,12 @@ public final class VanksAccess extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent e) {
+        // плавающие окна: появились, сдвинулись, закрылись — рамки за ними
+        if (frames != null && (e.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+                || e.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)) {
+            ui.removeCallbacks(frameUpdate);
+            ui.postDelayed(frameUpdate, 30);
+        }
         if (e.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && e.getPackageName() != null) {
             String p = e.getPackageName().toString();
             // клавиатура и системная шторка «передним» приложением не считаются
@@ -1297,6 +1315,100 @@ public final class VanksAccess extends AccessibilityService {
         int d = p.charAt(i) - '0';
         if (d >= 0 && d <= 9 && keys[d] != null) keys[d].performAction(AccessibilityNodeInfo.ACTION_CLICK);
         ui.postDelayed(() -> press(keys, p, i + 1), 70);
+    }
+
+    // ── плитка VPN в шторке Android (QsTiles: без системного нажатия) ──────
+
+    /**
+     * Открыть быстрые настройки Android, нажать плитку с подписью label (или
+     * названием приложения) и закрыть шторку. Уведомления не трогаем: плитка
+     * узкая, уведомление — во всю ширину. Не нашлась (плитки нет в шторке) —
+     * шторку закрываем и вызываем fail.
+     */
+    void clickQsTile(String label, String app, Runnable fail) {
+        if (!performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)) {
+            fail.run();
+            return;
+        }
+        tryTile(label.toLowerCase(), app.toLowerCase(), 0, fail);
+    }
+
+    private void tryTile(String label, String app, int attempt, Runnable fail) {
+        ui.postDelayed(() -> {
+            AccessibilityNodeInfo tile = findTile(label, app);
+            if (tile != null) {
+                tile.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                ui.postDelayed(this::closeShade, 700);
+                return;
+            }
+            // плиток много — на следующей странице
+            if (attempt == 1) scrollShade();
+            if (attempt < 3) tryTile(label, app, attempt + 1, fail);
+            else {
+                closeShade();
+                fail.run();
+            }
+        }, attempt == 0 ? 600 : 450);
+    }
+
+    private void closeShade() {
+        // 15 — GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE (Android 12+)
+        if (android.os.Build.VERSION.SDK_INT < 31 || !performGlobalAction(15)) performGlobalAction(GLOBAL_ACTION_BACK);
+    }
+
+    private AccessibilityNodeInfo findTile(String label, String app) {
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        for (AccessibilityNodeInfo root : roots()) {
+            ArrayDeque<AccessibilityNodeInfo> q = new ArrayDeque<>();
+            q.add(root);
+            int seen = 0;
+            while (!q.isEmpty() && seen++ < 1500) {
+                AccessibilityNodeInfo n = q.poll();
+                String t = (String.valueOf(n.getText()) + " " + n.getContentDescription()).toLowerCase();
+                if (t.contains(label) || (!app.isEmpty() && t.contains(app))) {
+                    AccessibilityNodeInfo c = n;
+                    for (int up = 0; c != null && !c.isClickable() && up < 4; up++) c = c.getParent();
+                    if (c != null && c.isClickable() && !notification(c)) {
+                        android.graphics.Rect r = new android.graphics.Rect();
+                        c.getBoundsInScreen(r);
+                        if (r.width() > 0 && r.width() < screenW * 0.62f) return c;
+                    }
+                }
+                for (int i = 0; i < n.getChildCount(); i++) {
+                    AccessibilityNodeInfo ch = n.getChild(i);
+                    if (ch != null) q.add(ch);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean notification(AccessibilityNodeInfo n) {
+        for (int up = 0; n != null && up < 6; up++, n = n.getParent()) {
+            String id = String.valueOf(n.getViewIdResourceName()).toLowerCase(), cls = String.valueOf(n.getClassName()).toLowerCase();
+            if (id.contains("notification") || cls.contains("notification")) return true;
+        }
+        return false;
+    }
+
+    private void scrollShade() {
+        for (AccessibilityNodeInfo root : roots()) {
+            ArrayDeque<AccessibilityNodeInfo> q = new ArrayDeque<>();
+            q.add(root);
+            int seen = 0;
+            while (!q.isEmpty() && seen++ < 800) {
+                AccessibilityNodeInfo n = q.poll();
+                String id = String.valueOf(n.getViewIdResourceName()).toLowerCase();
+                if (n.isScrollable() && (id.contains("qs") || id.contains("tile") || id.contains("pager"))) {
+                    n.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD);
+                    return;
+                }
+                for (int i = 0; i < n.getChildCount(); i++) {
+                    AccessibilityNodeInfo ch = n.getChild(i);
+                    if (ch != null) q.add(ch);
+                }
+            }
+        }
     }
 
     private List<AccessibilityNodeInfo> roots() {

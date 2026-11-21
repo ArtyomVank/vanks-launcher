@@ -136,6 +136,7 @@ public final class SettingsActivity extends Activity {
             case "feel": return feelPage();
             case "about": return aboutPage();
             case "update": return updatePage();
+            case "link": return linkPage();
         }
         return null;
     }
@@ -535,6 +536,7 @@ public final class SettingsActivity extends Activity {
         add(net, btRow);
         add(net, row(GREEN, Glyph::signal, "Сеть и интернет", "SIM, мобильные данные", null, () -> open(Settings.ACTION_WIRELESS_SETTINGS)));
         add(net, row(ORANGE, Glyph::plane, "Авиарежим", null, null, () -> open(Settings.ACTION_AIRPLANE_MODE_SETTINGS)));
+        add(net, row(BLUE, Glyph::phone, "Delta Link", "Компьютер с Delta: уведомления, буфер, файлы", null, () -> push(linkPage(), true)));
         sysRow(net, GREEN, Glyph::hotspot, "Точка доступа", "Раздать интернет", "android.settings.TETHER_SETTINGS");
         sysRow(net, INDIGO, Glyph::vpn, "VPN", null, Settings.ACTION_VPN_SETTINGS);
         sysRow(net, BLUE, Glyph::bluetooth, "Подключённые устройства", "NFC, печать, трансляция", "android.settings.CONNECTED_DEVICES_SETTINGS");
@@ -2472,6 +2474,12 @@ public final class SettingsActivity extends Activity {
             Prefs.edgeWindow = v;
             save();
         }));
+        add(w, toggleRow(TEAL, Glyph::resize, "Рамки окон", "Скруглённые углы, свернуть, на весь экран, закрыть; потянуть пилюлю — переезд, уголок — размер. Нужна служба «Vanks: жесты и вход»",
+                Prefs.winFrames, v -> {
+                    Prefs.winFrames = v;
+                    save();
+                    VanksAccess.framesChanged();
+                }));
 
         Group list = group(col, "Приложения", "Не больше " + EdgeService.MAX + ". Пока ничего не выбрано, в панели — док и первые значки.");
         TextView count = Views.label(this, "", 13, Ui.regular, SUB);
@@ -2640,6 +2648,26 @@ public final class SettingsActivity extends Activity {
             rows.add(r);
             add(g, r);
         }
+        // плитка «VPN»: какое приложение она включает (если их несколько)
+        java.util.List<QsTiles.Entry> vpns = QsTiles.vpns(this);
+        if (vpns.size() > 1) {
+            Group vg = group(col, "VPN", "Плитка «VPN» включает и выключает VPN в этом приложении, не открывая его. "
+                    + "На обычном телефоне — ярлыком приложения или его плиткой в шторке Android (нужна служба «Vanks: жесты и вход» и плитка VPN в шторке).");
+            QsTiles.Entry cur = QsTiles.vpnFor(this);
+            View[] vr = new View[1];
+            vr[0] = row(0xFF2FBF71, Glyph::vpn, "Приложение VPN", null, cur == null ? "Спросить" : cur.app, () -> {
+                String[] names = new String[vpns.size()];
+                for (int i = 0; i < names.length; i++) names[i] = vpns.get(i).app;
+                new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setTitle("Какой VPN включать?")
+                        .setItems(names, (d, w) -> {
+                            QsTiles.setVpnChoice(this, vpns.get(w).type);
+                            setValue(vr[0], vpns.get(w).app);
+                        })
+                        .show();
+            });
+            add(vg, vr[0]);
+        }
         Group reset = group(col, null, null);
         LinearLayout r = row(0, null, "Вернуть плитки по умолчанию", null, null, null);
         ((TextView) ((LinearLayout) r.getChildAt(0)).getChildAt(0)).setTextColor(RED);
@@ -2702,6 +2730,136 @@ public final class SettingsActivity extends Activity {
     }
 
     // ── жесты ─────────────────────────────────────────────────────────────
+
+    // ── Delta Link ────────────────────────────────────────────────────────
+
+    /** Перерисовать открытую страницу Delta Link (привязали, отвязали). */
+    private void relink() {
+        if (pages.size() < 2) return;
+        View top = pages.remove(pages.size() - 1);
+        stack.removeView(top);
+        push(linkPage(), false);
+    }
+
+    private View linkPage() {
+        View[] out = new View[1];
+        LinearLayout col = page("Delta Link", "Настройки", out);
+        boolean paired = Link.paired(this), notes = VanksNotes.allowed(this);
+        Group st = group(col, null, "Телефон и компьютер с Delta в одной сети Wi‑Fi: уведомления и звонки на компьютере, "
+                + "общий буфер обмена, файлы в обе стороны, заряд телефона и «Найти телефон».");
+        add(st, toggleRow(BLUE, Glyph::phone, "Delta Link", null, Link.enabled(this), on -> {
+            Link.sp(this).edit().putBoolean("on", on).apply();
+            if (on) Link.start(this);
+            else Link.stop();
+        }));
+        if (paired) {
+            Group pc = group(col, "Компьютер", "С компьютера: «Файлы» в Delta Link — они ложатся в «Загрузки» телефона. "
+                    + "Отсюда — «Поделиться → Delta Link» в любом приложении.");
+            View r = row(GREEN, Glyph::phone, Link.pcName(this), Link.sp(this).getString("host", ""), Link.online() ? "В сети" : "Не отвечает", null);
+            add(pc, r);
+            // онлайн меняется сам — подписывать, пока страница открыта
+            Runnable tick = new Runnable() {
+                public void run() {
+                    if (!r.isAttachedToWindow()) return;
+                    setValue(r, !Link.enabled(SettingsActivity.this) ? "Выкл." : Link.online() ? "В сети" : "Не отвечает");
+                    r.postDelayed(this, 2000);
+                }
+            };
+            r.postDelayed(tick, 2000);
+            add(pc, row(RED, Glyph::close, "Отвязать", null, null, () ->
+                    new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                            .setTitle("Отвязать «" + Link.pcName(this) + "»?")
+                            .setMessage("Уведомления, буфер и файлы перестанут ходить. Привязать снова можно кодом с компьютера.")
+                            .setPositiveButton("Отвязать", (d, w) -> {
+                                Link.unpair(this);
+                                relink();
+                            })
+                            .setNegativeButton("Отмена", null)
+                            .show()));
+        } else {
+            Group find = group(col, "Привязать компьютер", "На компьютере: Настройки → Delta Link → «Показать код».");
+            Group found = group(col, null, null);
+            View search = row(BLUE, Glyph::search, "Искать ещё раз", null, "", null);
+            Runnable[] look = new Runnable[1];
+            look[0] = () -> {
+                setValue(search, "Ищу…");
+                found.box.removeAllViews();
+                found.rows.clear();
+                found.seps.clear();
+                Link.discover(this, list -> {
+                    setValue(search, list.isEmpty() ? "Не нашёл" : "");
+                    for (Link.Pc p : list)
+                        add(found, row(GREEN, Glyph::phone, p.name, p.host, null, () -> askLinkCode(p)));
+                });
+            };
+            search.setOnClickListener(v -> look[0].run());
+            search.setBackground(new RippleDrawable(ColorStateList.valueOf(0x22FFFFFF), null, new ColorDrawable(0xFFFFFFFF)));
+            add(find, search);
+            add(find, row(GREY, Glyph::wifi, "Ввести адрес", "Если компьютер не находится", null, this::askLinkAddress));
+            look[0].run();
+        }
+        Group what = group(col, "Что передавать", "Свой буфер телефон отправляет, когда вы возвращаетесь на стол: "
+                + "фоновым приложениям Android читать буфер не даёт. Пароли, помеченные как секрет, не уходят.");
+        add(what, toggleRow(RED, Glyph::bell, "Уведомления на компьютер", null, Link.notes(this), on ->
+                Link.sp(this).edit().putBoolean("notes", on).apply()));
+        add(what, toggleRow(INDIGO, Glyph::pin, "Общий буфер обмена", null, Link.clip(this), on ->
+                Link.sp(this).edit().putBoolean("clip", on).apply()));
+        Group need = group(col, "Что нужно", "Уведомления Delta Link берёт из доступа к уведомлениям — того же, что у динамического острова. "
+                + "С ним связь работает и в фоне.");
+        add(need, row(notes ? GREEN : ORANGE, Glyph::bell, "Доступ к уведомлениям", notes ? null : "«Vanks: динамический остров»",
+                notes ? "Вкл." : "Выкл.", () -> {
+                    if (VanksNotes.turnOn(this)) toast("Доступ к уведомлениям включён");
+                }));
+        return out[0];
+    }
+
+    private void askLinkCode(Link.Pc pc) {
+        EditText e = new EditText(this);
+        e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        e.setHint("6 цифр");
+        e.setTextColor(0xFFFFFFFF);
+        e.setHintTextColor(SUB);
+        e.setTextSize(24);
+        e.setGravity(Gravity.CENTER);
+        LinearLayout box = new LinearLayout(this);
+        box.setPadding(Ui.dp(22), Ui.dp(8), Ui.dp(22), 0);
+        box.addView(e, new LinearLayout.LayoutParams(-1, -2));
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Код с «" + pc.name + "»")
+                .setMessage("На компьютере: Настройки → Delta Link → «Показать код».")
+                .setView(box)
+                .setPositiveButton("Привязать", (d, w) -> Link.pair(this, pc, e.getText().toString(), err -> {
+                    if (err != null) {
+                        toast(err);
+                        return;
+                    }
+                    toast("Привязано к «" + pc.name + "»");
+                    relink();
+                }))
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void askLinkAddress() {
+        EditText e = new EditText(this);
+        e.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        e.setHint("192.168.1.10");
+        e.setTextColor(0xFFFFFFFF);
+        e.setHintTextColor(SUB);
+        LinearLayout box = new LinearLayout(this);
+        box.setPadding(Ui.dp(22), Ui.dp(8), Ui.dp(22), 0);
+        box.addView(e, new LinearLayout.LayoutParams(-1, -2));
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Адрес компьютера")
+                .setMessage("Его видно на компьютере в «Сети» или командой ip addr.")
+                .setView(box)
+                .setPositiveButton("Дальше", (d, w) -> Link.probe(this, e.getText().toString(), pc -> {
+                    if (pc == null) toast("По этому адресу Delta Link не отвечает");
+                    else askLinkCode(pc);
+                }))
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
 
     private View islandPage() {
         View[] out = new View[1];
