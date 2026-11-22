@@ -32,7 +32,8 @@ final class Games {
             {"com.eltechs.ed", "ExaGear"},
     };
 
-    static final String WINLATOR_PAGE = "https://github.com/brunodev85/winlator/releases";
+    /** Vanks Proton — сборка GameNative для Vanks; лежит в релизе лаунчера 1.2. */
+    static final String PROTON_APK = "https://github.com/ArtyomVank/vanks-launcher/releases/download/v1.2/vanks-proton.apk";
 
     private Games() {}
 

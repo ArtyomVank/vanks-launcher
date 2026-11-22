@@ -3,7 +3,6 @@ package os.vanks.launcher;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.content.Context;
-import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -20,36 +19,52 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 
 /**
- * Рамки плавающих окон Vanks. Окна произвольной формы рисует и двигает сам
- * Android, Vanks (служба «Vanks: жесты и вход») кладёт поверх каждого окна:
- *   • скруглённую рамку — она закрывает квадратные углы окна (сквозь неё
- *     касания проходят к приложению и к краю, за который система меняет размер);
+ * Рамки плавающих окон Vanks. Окна произвольной формы рисует сам Android,
+ * Vanks (служба «Vanks: жесты и вход») кладёт поверх каждого окна:
+ *   • рамку снаружи окна со скруглёнными углами — её внутренние углы
+ *     закрывают квадратные углы окна (касания сквозь рамку проходят в окно);
  *   • пилюлю над окном: «свернуть», «на весь экран», «закрыть»; потянуть её —
  *     окно переезжает;
  *   • уголок справа снизу — потянуть, окно меняет размер.
- * Двигает и тянет окно сама система: по отпусканию пальца служба проводит
- * такой же жест по заголовку окна или по его краю (dispatchGesture), а пока
- * палец ведёт — рисуется контур нового места. Кнопки сначала ищут свои в
- * заголовке окна Android (maximize_window, close_window, minimize_window);
- * нет — «свернуть» уводит окна на стол, «закрыть» выгружает приложение.
+ * Пока палец ведёт, рисуется контур нового места, по отпусканию окно встаёт туда.
+ * На Vanks OS у окна свой заголовок Android (назад, свернуть, развернуть,
+ * закрыть; потянуть — окно переезжает) — пилюлю там не рисуем, чтобы не было
+ * двух рядов кнопок, а уголок размера — только если окна двигает сам
+ * диспетчер задач (Tasks): тянуть край окна Android не даёт. На других
+ * телефонах — жест по заголовку окна или его краю (dispatchGesture), а кнопки
+ * ищут свои в заголовке окна Android (maximize_window, close_window, minimize_window).
+ * Рамка только у самого окна: диалоги и меню внутри окна или поверх
+ * приложения на весь экран рамки не получают.
  */
 final class WinFrames {
-    private static final float R_DP = 20, RING_DP = 3, BAR_W_DP = 132, BAR_H_DP = 30, GRIP_DP = 30;
+    // RING — ширина рамки снаружи окна; R_OUT — скругление снаружи (не больше
+    // RING × 3,4, иначе угол окна высунется за рамку); R_IN — скругление внутри
+    private static final float RING_DP = 6, R_OUT_DP = 18, R_IN_DP = 12, BAR_W_DP = 132, BAR_H_DP = 30, GRIP_DP = 34;
 
     private final VanksAccess s;
     private final WindowManager wm;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final HashMap<Integer, Frame> frames = new HashMap<>();
     private boolean dragging;
+    // у окон есть заголовок Android с кнопками (Vanks OS — AOSP с оболочкой WM Shell)
+    private final boolean caption = Updater.osVersion() != null;
 
     WinFrames(VanksAccess s) {
         this.s = s;
         this.wm = s.getSystemService(WindowManager.class);
+    }
+
+    /** Окно приложения на экране: место, приложение и порядок (0 — самое верхнее). */
+    private static final class Win {
+        final Rect b = new Rect();
+        String pkg;
+        int z, id;
     }
 
     /** Окна поменялись (служба зовёт на TYPE_WINDOWS_CHANGED и по таймеру). */
@@ -57,29 +72,26 @@ final class WinFrames {
         if (dragging) return;
         HashSet<Integer> seen = new HashSet<>();
         if (Prefs.winFrames) {
-            int sw = s.getResources().getDisplayMetrics().widthPixels;
-            List<AccessibilityWindowInfo> ws;
-            try {
-                ws = s.getWindows();
-            } catch (RuntimeException e) {
-                ws = java.util.Collections.emptyList();
-            }
-            for (AccessibilityWindowInfo w : ws) {
-                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION || w.isInPictureInPictureMode()) continue;
-                Rect b = new Rect();
-                w.getBoundsInScreen(b);
-                // на весь экран и половинки экрана — без рамки
-                if (b.width() >= sw * 0.98f || b.width() < Ui.dp(80) || b.height() < Ui.dp(80)) continue;
-                AccessibilityNodeInfo root = w.getRoot();
-                String pkg = root == null || root.getPackageName() == null ? "" : root.getPackageName().toString();
-                if (pkg.isEmpty() || pkg.equals(s.getPackageName())) continue;
-                seen.add(w.getId());
-                Frame f = frames.get(w.getId());
-                if (f == null) {
-                    f = new Frame(w.getId());
-                    frames.put(w.getId(), f);
+            ArrayList<Win> apps = appWindows();
+            if (Tasks.ok(s)) {
+                for (Tasks.Task t : Tasks.freeform(s)) {
+                    if (!t.visible || t.pkg.equals(s.getPackageName())) continue;
+                    // окно задачи на экране: верхнее окно того же приложения в её границах
+                    Win w = null;
+                    for (Win a : apps) {
+                        if (a.pkg.equals(t.pkg) && Rect.intersects(a.b, t.bounds)) { w = a; break; }
+                    }
+                    if (w == null) continue;
+                    show(seen, t.id, t.bounds, t.pkg, t, w.z, apps);
                 }
-                f.place(b, pkg);
+            } else {
+                int sw = s.getResources().getDisplayMetrics().widthPixels;
+                for (Win w : apps) {
+                    if (w.pkg.equals(s.getPackageName())) continue;
+                    if (w.b.width() >= sw * 0.98f || w.b.width() < Ui.dp(80) || w.b.height() < Ui.dp(80)) continue;
+                    if (inside(w, apps, sw)) continue;
+                    show(seen, w.id, w.b, w.pkg, null, w.z, apps);
+                }
             }
         }
         for (Integer id : new HashSet<>(frames.keySet())) {
@@ -91,6 +103,56 @@ final class WinFrames {
     }
 
     private final Runnable poll = this::update;
+
+    private ArrayList<Win> appWindows() {
+        ArrayList<Win> out = new ArrayList<>();
+        List<AccessibilityWindowInfo> ws;
+        try {
+            ws = s.getWindows();
+        } catch (RuntimeException e) {
+            return out;
+        }
+        // getWindows — сверху вниз
+        for (int i = 0; i < ws.size(); i++) {
+            AccessibilityWindowInfo w = ws.get(i);
+            if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION || w.isInPictureInPictureMode()) continue;
+            AccessibilityNodeInfo root = w.getRoot();
+            String pkg = root == null || root.getPackageName() == null ? "" : root.getPackageName().toString();
+            if (pkg.isEmpty()) continue;
+            Win a = new Win();
+            w.getBoundsInScreen(a.b);
+            a.pkg = pkg;
+            a.z = i;
+            a.id = w.getId();
+            out.add(a);
+        }
+        return out;
+    }
+
+    /** Диалог или меню: внутри другого окна того же приложения или поверх него на весь экран. */
+    private static boolean inside(Win w, List<Win> apps, int sw) {
+        for (Win o : apps) {
+            if (o == w || !o.pkg.equals(w.pkg)) continue;
+            if (o.b.width() >= sw * 0.98f) return true;
+            if (o.b.contains(w.b) && !o.b.equals(w.b)) return true;
+        }
+        return false;
+    }
+
+    private void show(HashSet<Integer> seen, int id, Rect b, String pkg, Tasks.Task task, int z, List<Win> apps) {
+        seen.add(id);
+        // что лежит выше этого окна: там рамку не рисуем, чтобы не наползала на соседа
+        ArrayList<Rect> above = new ArrayList<>();
+        for (Win a : apps) {
+            if (a.z < z && !(a.pkg.equals(pkg) && b.contains(a.b))) above.add(new Rect(a.b));
+        }
+        Frame f = frames.get(id);
+        if (f == null) {
+            f = new Frame(id);
+            frames.put(id, f);
+        }
+        f.place(b, pkg, task, above);
+    }
 
     void clear() {
         for (Frame f : frames.values()) f.remove();
@@ -122,10 +184,13 @@ final class WinFrames {
         final int id;
         final Rect bounds = new Rect();
         String pkg = "";
+        Tasks.Task task;
+        final ArrayList<Rect> above = new ArrayList<>();
         final Ring ring;
         final Bar bar;
         final Grip grip;
         final WindowManager.LayoutParams ringLp = lp(false), barLp = lp(true), gripLp = lp(true);
+        boolean barHidden, gripHidden, passing;
         // куда ведёт палец: смещение окна (перенос) или новый правый нижний угол (размер)
         int dx, dy, dw, dh;
         boolean moving, sizing;
@@ -143,30 +208,47 @@ final class WinFrames {
             }
         }
 
-        void place(Rect b, String p) {
+        void place(Rect b, String p, Tasks.Task t, List<Rect> over) {
             pkg = p;
-            if (b.equals(bounds) && ring.isAttachedToWindow()) return;
+            task = t;
+            boolean same = b.equals(bounds) && over.equals(above) && ring.isAttachedToWindow();
+            above.clear();
+            above.addAll(over);
+            if (same) return;
             bounds.set(b);
-            int t = Ui.dp(RING_DP);
-            // рамка шире окна на толщину — и снаружи, и на углах внутрь
-            ringLp.x = b.left - t;
-            ringLp.y = b.top - t;
-            ringLp.width = b.width() + 2 * t;
-            ringLp.height = b.height() + 2 * t;
+            int r = Ui.dp(RING_DP);
+            ringLp.x = b.left - r;
+            ringLp.y = b.top - r;
+            ringLp.width = b.width() + 2 * r;
+            ringLp.height = b.height() + 2 * r;
             int bw = Ui.dp(BAR_W_DP), bh = Ui.dp(BAR_H_DP);
             barLp.width = bw;
             barLp.height = bh;
             barLp.x = b.centerX() - bw / 2;
             // над окном; у самого верха экрана — внутри, по верхнему краю
-            barLp.y = b.top - bh - Ui.dp(6) > Ui.dp(28) ? b.top - bh - Ui.dp(6) : b.top + Ui.dp(6);
+            int up = b.top - r - bh - Ui.dp(6);
+            barLp.y = up > Ui.dp(28) ? up : b.top + Ui.dp(6);
             int g = Ui.dp(GRIP_DP);
             gripLp.width = gripLp.height = g;
-            gripLp.x = b.right - g + Ui.dp(10);
-            gripLp.y = b.bottom - g + Ui.dp(10);
+            gripLp.x = b.right + r - g + Ui.dp(8);
+            gripLp.y = b.bottom + r - g + Ui.dp(8);
+            // пилюля и уголок под чужим окном — прячем, иначе нажмутся сквозь него
+            barHidden = caption || covered(barLp);
+            gripHidden = caption && task == null || covered(gripLp);
             relayout();
         }
 
+        private boolean covered(WindowManager.LayoutParams l) {
+            Rect r = new Rect(l.x, l.y, l.x + l.width, l.y + l.height);
+            for (Rect a : above) if (Rect.intersects(a, r)) return true;
+            return false;
+        }
+
         void relayout() {
+            touchable(barLp, !barHidden && !passing);
+            touchable(gripLp, !gripHidden && !passing);
+            bar.setVisibility(barHidden ? View.INVISIBLE : View.VISIBLE);
+            grip.setVisibility(gripHidden ? View.INVISIBLE : View.VISIBLE);
             try {
                 wm.updateViewLayout(ring, ringLp);
                 wm.updateViewLayout(bar, barLp);
@@ -176,16 +258,21 @@ final class WinFrames {
             ring.invalidate();
         }
 
+        private void touchable(WindowManager.LayoutParams l, boolean on) {
+            if (on) l.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            else l.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        }
+
         void remove() {
             for (View v : new View[]{ring, bar, grip}) {
                 try { wm.removeViewImmediate(v); } catch (RuntimeException ignored) {}
             }
         }
 
-        /** Рамка: скруглённое кольцо поверх краёв окна и контур нового места, пока палец ведёт. */
+        /** Рамка снаружи окна и контур нового места, пока палец ведёт. */
         final class Ring extends View {
             private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), rim = new Paint(Paint.ANTI_ALIAS_FLAG),
-                    ghost = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    ghost = new Paint(Paint.ANTI_ALIAS_FLAG), veil = new Paint(Paint.ANTI_ALIAS_FLAG);
             private final Path path = new Path();
 
             Ring(Context c) {
@@ -197,25 +284,31 @@ final class WinFrames {
                 ghost.setStyle(Paint.Style.STROKE);
                 ghost.setStrokeWidth(Ui.dpf(2.5f));
                 ghost.setColor(Ui.accentLight());
+                veil.setColor(Ui.alpha(Ui.accentLight(), 0.16f));
             }
 
             @Override
             protected void onDraw(Canvas c) {
-                float t = Ui.dpf(RING_DP), r = Ui.dpf(R_DP);
+                float t = Ui.dpf(RING_DP), ro = Ui.dpf(R_OUT_DP), ri = Ui.dpf(R_IN_DP);
                 // растянута на весь экран (палец ведёт) — рамка на месте окна, иначе по своему размеру
                 boolean wide = moving || sizing;
-                float x = wide ? bounds.left - t : 0, y = wide ? bounds.top - t : 0;
-                float w = wide ? bounds.width() + 2 * t : getWidth(), h = wide ? bounds.height() + 2 * t : getHeight();
+                float ox = wide ? 0 : ringLp.x, oy = wide ? 0 : ringLp.y;
+                c.save();
+                for (Rect a : above) c.clipOutRect(a.left - ox, a.top - oy, a.right - ox, a.bottom - oy);
+                float x = bounds.left - t - ox, y = bounds.top - t - oy;
+                float w = bounds.width() + 2 * t, h = bounds.height() + 2 * t;
                 path.reset();
                 path.setFillType(Path.FillType.EVEN_ODD);
-                path.addRoundRect(new RectF(x, y, x + w, y + h), r + t, r + t, Path.Direction.CW);
-                path.addRoundRect(new RectF(x + t, y + t, x + w - t, y + h - t), r, r, Path.Direction.CW);
+                path.addRoundRect(new RectF(x, y, x + w, y + h), ro, ro, Path.Direction.CW);
+                path.addRoundRect(new RectF(x + t, y + t, x + w - t, y + h - t), ri, ri, Path.Direction.CW);
                 c.drawPath(path, fill);
-                c.drawRoundRect(new RectF(x + 0.5f, y + 0.5f, x + w - 0.5f, y + h - 0.5f), r + t, r + t, rim);
+                c.drawRoundRect(new RectF(x + 0.5f, y + 0.5f, x + w - 0.5f, y + h - 0.5f), ro, ro, rim);
+                c.restore();
                 if (wide) {
-                    // контур нового места
-                    RectF g = new RectF(x + t + dx, y + t + dy, x + w - t + dx + dw, y + h - t + dy + dh);
-                    c.drawRoundRect(g, r, r, ghost);
+                    // контур нового места: окно встанет сюда, когда палец отпустит
+                    RectF g = new RectF(x + dx, y + dy, x + w + dx + dw, y + h + dy + dh);
+                    c.drawRoundRect(g, ro, ro, veil);
+                    c.drawRoundRect(g, ro, ro, ghost);
                 }
             }
         }
@@ -302,9 +395,9 @@ final class WinFrames {
 
             @Override
             protected void onDraw(Canvas c) {
-                float w = getWidth(), h = getHeight(), k = Ui.dpf(10), o = Ui.dpf(10);
-                // дуга по скруглённому углу окна
-                c.drawArc(new RectF(w - o - 2 * k - Ui.dpf(R_DP), h - o - 2 * k - Ui.dpf(R_DP), w - o, h - o), 15, 60, false, p);
+                float w = getWidth(), h = getHeight(), o = Ui.dpf(8), ro = Ui.dpf(R_OUT_DP);
+                // дуга по скруглённому углу рамки
+                c.drawArc(new RectF(w - o - 2 * ro, h - o - 2 * ro, w - o, h - o), 15, 60, false, p);
             }
 
             @Override
@@ -351,12 +444,18 @@ final class WinFrames {
             dx = dy = dw = dh = 0;
             Rect b = new Rect(bounds);
             bounds.setEmpty();
-            place(b, pkg);
+            place(b, pkg, task, new ArrayList<>(above));
         }
 
         void finishMove() {
             int mx = dx, my = dy;
             cancelDrag();
+            if (task != null) {
+                Rect r = new Rect(bounds);
+                r.offset(mx, my);
+                set(r);
+                return;
+            }
             Rect cap = caption();
             // за заголовок окна Android; нет заголовка — за верхнюю полосу окна (её система и держит)
             float x0 = cap != null ? cap.centerX() : bounds.centerX();
@@ -367,9 +466,31 @@ final class WinFrames {
         void finishSize() {
             int w = dw, h = dh;
             cancelDrag();
+            if (task != null) {
+                set(new Rect(bounds.left, bounds.top, bounds.right + w, bounds.bottom + h));
+                return;
+            }
             // за край окна снаружи: там система ловит изменение размера
             float x0 = bounds.right + Ui.dpf(5), y0 = bounds.bottom + Ui.dpf(5);
             drag(x0, y0, x0 + w, y0 + h, false);
+        }
+
+        /** Окно на новое место (Vanks OS): не выше строки состояния и не целиком за краем. */
+        void set(Rect r) {
+            android.util.DisplayMetrics dm = s.getResources().getDisplayMetrics();
+            int keep = Ui.dp(72), top = Ui.dp(30) + Ui.dp(BAR_H_DP) + Ui.dp(RING_DP);
+            r.offset(0, Math.max(0, top - r.top));
+            r.offset(Math.max(0, keep - r.right), 0);
+            r.offset(Math.min(0, dm.widthPixels - keep - r.left), 0);
+            r.offset(0, Math.min(0, dm.heightPixels - keep - r.top));
+            Tasks.place(task, r);
+            later();
+        }
+
+        /** Сверить рамки чуть позже: система ставит окно не мгновенно. */
+        void later() {
+            ui.postDelayed(WinFrames.this::update, 120);
+            ui.postDelayed(WinFrames.this::update, 400);
         }
 
         /** Провести жест системы: наши окна на это время пропускают касания. */
@@ -404,10 +525,7 @@ final class WinFrames {
         }
 
         void passThrough(boolean on) {
-            for (WindowManager.LayoutParams l : new WindowManager.LayoutParams[]{barLp, gripLp}) {
-                if (on) l.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-                else l.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-            }
+            passing = on;
             relayout();
         }
 
@@ -461,20 +579,24 @@ final class WinFrames {
         }
 
         void minimize() {
+            // Vanks OS: окно уходит под стол одно, остальные остаются; вернуть — значок
+            // на столе, в панели или карточка в «Недавних»
+            if (task != null && Tasks.minimize(task)) { later(); return; }
             if (press("minimize_window", "minimize_button")) return;
-            // свернуть одно окно Android стороннему не даёт — окна уходят, виден стол;
-            // вернуть — значок в панели или в «Недавних»
+            // свернуть одно окно Android стороннему не даёт — окна уходят, виден стол
             s.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);
         }
 
         void maximize() {
+            if (task != null && Tasks.maximize(task)) { later(); return; }
             if (press("maximize_window", "maximize_button_view", "maximize_button")) return;
             Windows.fullscreen(s, pkg);
         }
 
         void close() {
-            if (press("close_window", "close_button")) return;
             String p = pkg;
+            if (task != null && Tasks.close(task)) { later(); return; }
+            if (press("close_window", "close_button")) return;
             remove();
             frames.remove(id);
             Unload.closeWindow(s, p);

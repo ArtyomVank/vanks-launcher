@@ -163,9 +163,10 @@ public final class GamesActivity extends Activity {
         if (emus.isEmpty()) {
             col.addView(note("Нужен эмулятор Windows",
                     "Windows-игры на телефоне запускает эмулятор: Wine переводит Windows в Android, Box64 — команды компьютера в команды телефона. "
-                            + "Бесплатный и открытый — Winlator: скачайте его со страницы проекта, установите, добавьте игру (папку с .exe) "
-                            + "и нажмите у неё «Добавить на главный экран». Подойдут и Vanks Proton, GameHub, GameNative.",
-                    "Winlator на GitHub", () -> open(new Intent(Intent.ACTION_VIEW, Uri.parse(Games.WINLATOR_PAGE)))), lp(-1, -2, 0, 0, 0, 14));
+                            + "Для Vanks есть свой — Vanks Proton: игры из Steam и папки с .exe, у каждой игры свои настройки Wine, "
+                            + "раскладка клавиатуры и мыши на экране. Скачайте и установите его, добавьте игру "
+                            + "и нажмите у неё «Добавить на главный экран». Подойдут и Winlator, GameHub, GameNative.",
+                    "Скачать Vanks Proton", () -> open(new Intent(Intent.ACTION_VIEW, Uri.parse(Games.PROTON_APK)))), lp(-1, -2, 0, 0, 0, 14));
         }
 
         if (!games.isEmpty()) {

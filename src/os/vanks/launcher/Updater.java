@@ -131,12 +131,14 @@ final class Updater {
                     String tag = j.optString("tag_name", "").replaceFirst("^[vV]", "");
                     JSONArray as = j.optJSONArray("assets");
                     JSONObject apk = null;
+                    // в релизе бывают и другие APK (Vanks Proton): берём лаунчер по имени,
+                    // а без такого — первый APK, который не Proton
                     if (as != null) for (int i = 0; i < as.length(); i++) {
                         JSONObject a = as.getJSONObject(i);
-                        if (a.optString("name").toLowerCase(Locale.ROOT).endsWith(".apk")) {
-                            apk = a;
-                            break;
-                        }
+                        String n = a.optString("name").toLowerCase(Locale.ROOT);
+                        if (!n.endsWith(".apk") || n.contains("proton")) continue;
+                        if (n.startsWith("vanks-launcher")) { apk = a; break; }
+                        if (apk == null) apk = a;
                     }
                     sp(app).edit().putLong("last", System.currentTimeMillis()).apply();
                     if (apk != null && !tag.isEmpty() && compare(tag, current(app)) > 0) {

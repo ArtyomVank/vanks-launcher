@@ -394,8 +394,11 @@ public final class GalleryActivity extends Activity {
             r.set(0, 0, w, w);
             float rad = name != null ? Ui.dpf(16) : 0;
             Bitmap b = m == null ? null : thumb(m, this);
-            if (b != null) Ui.drawCover(c, b, r, rad, p, 1f);
-            else {
+            if (b != null) {
+                // кисть могла остаться от заглушки (6 % непрозрачности) — фото было бы тусклым
+                p.setAlpha(255);
+                Ui.drawCover(c, b, r, rad, p, 1f);
+            } else {
                 p.setColor(Ui.alpha(Look.fg(), 0.06f));
                 c.drawRoundRect(r, rad, rad, p);
             }
