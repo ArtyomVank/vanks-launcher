@@ -134,7 +134,9 @@ public final class LockService extends Service {
                 // (без него Android не расшифрует данные) — второй замок не нужен
                 android.app.KeyguardManager km = c.getSystemService(android.app.KeyguardManager.class);
                 boolean secure = km != null && km.isDeviceSecure();
-                if (Prefs.lockMain && canOpen(c) && !secure) LockActivity.show(c);
+                boolean updated = Intent.ACTION_MY_PACKAGE_REPLACED.equals(i.getAction());
+                // после обновления: телефон заперт (системный замок на экране) — свой экран поверх
+                if (Prefs.lockMain && canOpen(c) && (updated ? km != null && km.isKeyguardLocked() : !secure)) LockActivity.show(c);
             }
             // на обычном телефоне после включения он уже открыт системным
             // замком — свой экран покажется при следующем выключении экрана

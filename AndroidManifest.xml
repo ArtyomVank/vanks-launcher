@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="os.vanks.launcher"
-    android:versionCode="33"
-    android:versionName="1.2">
+    android:versionCode="34"
+    android:versionName="1.3">
 
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="36" />
 
@@ -49,6 +49,8 @@
     <uses-permission android:name="android.permission.ACCESS_CONTEXTUAL_SEARCH" />
     <uses-permission android:name="android.permission.INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.REAL_GET_TASKS" />
+    <!-- «В окно» без прав «Недавних»: поднять задачу с параметрами плавающего окна -->
+    <uses-permission android:name="android.permission.REORDER_TASKS" />
     <!-- окна: двигать, менять размер, сворачивать и закрывать. На Vanks OS лаунчер —
          системные «Недавние», и Android выдаёт оба сам (signature|recents);
          на других телефонах не выдаются, рамки работают жестами -->
@@ -224,6 +226,13 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+        <!-- запись и проверка лица для входа (FaceUnlock) -->
+        <activity
+            android:name=".FaceActivity"
+            android:exported="false"
+            android:theme="@style/Vanks"
+            android:screenOrientation="portrait"
+            android:excludeFromRecents="true" />
         <activity
             android:name=".RecentsActivity"
             android:exported="false"
@@ -336,6 +345,8 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- после обновления Vanks (и по воздуху) — снова свой замок и службы -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
         <!-- снимок экрана для поиска по нему (Google Lens): только по выданному разрешению -->

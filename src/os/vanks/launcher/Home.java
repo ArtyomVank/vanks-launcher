@@ -188,6 +188,13 @@ public final class Home extends Activity {
         SettingsActivity.sync(this);
         Apps.load(this);
         if (Prefs.firstRun || (Prefs.home.isEmpty() && Prefs.dock.isEmpty())) Apps.pickDefaults(this);
+        // «В окно» — плитка пункта управления (прежние сборки клали значок в док)
+        if (!Prefs.floatTile) {
+            Prefs.dock.remove(getPackageName() + "/.FloatActivity");
+            if (!Prefs.tiles.contains("float:")) Prefs.tiles = Prefs.tiles.isEmpty() ? "float:1:1" : Prefs.tiles + ",float:1:1";
+            Prefs.floatTile = true;
+            Prefs.save();
+        }
         Apps.renderIcons(this, iconPx());
         Layout.load(this);
         Widgets.init(this);

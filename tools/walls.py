@@ -8,7 +8,8 @@
   res/raw/wall_*.agsl          — шейдеры в AGSL (tools/agsl.py);
   res/drawable-nodpi/s_*.jpg   — готовый кадр каждого обоя в портрете (для
                                  Android до 13, стекла, превью) и его размытая копия;
-  res/drawable-nodpi/wall_*    — текстуры: карта Луны, фото и маска «Вершины»;
+  res/drawable-nodpi/wall_*    — текстуры: карта Луны, фото и маска «Вершины»,
+                                 фон и ленты каждого «Акрила»;
   src/.../WallList.java        — список для кода.
 Запускать после правки обоев в Delta.
 """
@@ -108,7 +109,7 @@ def render(w, effects, tex, width, height):
             for k, v in zip("ABCD", w["colors"]):
                 b.setUniform("color" + k, skia.V4(*hexc(v)))
             b.setUniform("material", float(w["material"]))
-    for name, im in tex.get(w["frag"], {}).items():
+    for name, im in tex.get(w["id"], tex.get(w["frag"], {})).items():
         b.setChild(name, im.makeShader(skia.TileMode.kRepeat, skia.TileMode.kClamp, skia.SamplingOptions(skia.FilterMode.kLinear)))
         b.setUniform(name + "Size", skia.V2(float(im.width()), float(im.height())))
     surf = skia.Surface(width, height)
@@ -156,6 +157,16 @@ def main():
     tex = {"moon": {"moonMap": moon}, "peak": {"photo": photo, "mask": mask},
            "summit": {"photo": skia.Image.open(os.path.join(NODPI, "wall_summit_photo.jpg")),
                       "mask": skia.Image.open(os.path.join(NODPI, "wall_summit_mask.png"))}}
+    # «Акрил»: у каждого свой запечённый фон и ленты (tools/gen-acrylic-walls.sh в Delta)
+    for w in walls:
+        if w["frag"] != "acrylic":
+            continue
+        n = res_name(w["id"]).replace("s_", "wall_", 1)
+        base = skia.Image.open(os.path.join(SUPER, "super", w["src"] + "-base.jpg"))
+        rib = skia.Image.open(os.path.join(SUPER, "super", w["src"] + "-rib.jpg"))
+        save_jpg(base, os.path.join(NODPI, n + "_base.jpg"), 92)
+        save_jpg(rib, os.path.join(NODPI, n + "_rib.jpg"), 92)
+        tex[w["id"]] = {"photo": base, "mask": rib}
     for w in walls:
         im = render(w, effects, tex, W, H)
         save_jpg(im, os.path.join(NODPI, res_name(w["id"]) + ".jpg"))

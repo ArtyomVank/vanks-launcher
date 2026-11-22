@@ -27,6 +27,8 @@ final class Tasks {
         String pkg;
         final Rect bounds = new Rect();
         Object token;
+        /** С чего задача начиналась — открыть её снова (без MANAGE_ACTIVITY_TASKS). */
+        android.content.Intent intent;
         boolean visible = true;
     }
 
@@ -137,6 +139,62 @@ final class Tasks {
     /** На весь экран: режим окна наследует экран, размер — весь. */
     static boolean maximize(Task t) {
         return run(t, setMode, UNDEFINED, setBounds, new Rect());
+    }
+
+    /**
+     * Последнее открытое приложение — верхняя задача не Vanks (стол, «Недавние»
+     * и «В окно» — это Vanks). null — открытых нет или задачи не видны.
+     * Хватает REAL_GET_TASKS; ключ окна (token) — только при ok().
+     */
+    @SuppressWarnings("deprecation")
+    static Task last(Context c) {
+        List<ActivityManager.RunningTaskInfo> ts;
+        try {
+            ts = c.getSystemService(ActivityManager.class).getRunningTasks(16);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        for (ActivityManager.RunningTaskInfo ti : ts) {
+            String pkg = ti.topActivity != null ? ti.topActivity.getPackageName()
+                    : ti.baseActivity != null ? ti.baseActivity.getPackageName() : "";
+            if (pkg.isEmpty() || pkg.equals(c.getPackageName()) || pkg.equals("com.android.systemui")) continue;
+            try {
+                Object cfg = field(ti, "configuration");
+                Object wc = cfg.getClass().getField("windowConfiguration").get(cfg);
+                // только обычные приложения: не стол и не «Недавние» системы
+                int type = (int) wc.getClass().getMethod("getActivityType").invoke(wc);
+                if (type != 1) continue;
+                Task t = new Task();
+                t.id = ti.taskId;
+                t.pkg = pkg;
+                t.mode = (int) wc.getClass().getMethod("getWindowingMode").invoke(wc);
+                t.intent = ti.baseIntent;
+                if (ok(c)) t.token = field(ti, "token");
+                if (t.token != null || t.intent != null) return t;
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+            }
+        }
+        return null;
+    }
+
+    /** Режим окна задачи id сейчас; -1 — задачи нет или не видно. */
+    @SuppressWarnings("deprecation")
+    static int mode(Context c, int id) {
+        try {
+            for (ActivityManager.RunningTaskInfo ti : c.getSystemService(ActivityManager.class).getRunningTasks(16)) {
+                if (ti.taskId != id) continue;
+                Object cfg = field(ti, "configuration");
+                Object wc = cfg.getClass().getField("windowConfiguration").get(cfg);
+                return (int) wc.getClass().getMethod("getWindowingMode").invoke(wc);
+            }
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+        }
+        return -1;
+    }
+
+    /** Сделать окно плавающим на месте r и поднять наверх. */
+    static boolean floating(Task t, Rect r) {
+        return run(t, setMode, FREEFORM, setBounds, new Rect(r), reorder, true);
     }
 
     /** Закрыть окно, как смахивание в «Недавних»: задача убирается, приложение выгружается. */

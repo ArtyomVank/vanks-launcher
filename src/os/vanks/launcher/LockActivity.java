@@ -45,6 +45,11 @@ public final class LockActivity extends Activity {
     private Island island;
     private PinPad pad;
     private int misses;
+    /** Своё распознавание лица (FaceUnlock): остановить; null — не ищем. faceTried — уже искали за это включение. */
+    private Runnable faceStop;
+    private boolean faceTried;
+    /** Окно действительно на переднем плане (камеру Android даёт только ему). */
+    private boolean fg;
 
     /** Запереть: открыть экран блокировки поверх всего. */
     static void show(Context c) {
@@ -85,8 +90,9 @@ public final class LockActivity extends Activity {
         lock.listener = this::tapped;
         root.addView(lock, new FrameLayout.LayoutParams(-1, -1));
 
-        // двойное касание — ввод пароля (для другого человека или если палец не читается)
-        lock.onDoubleTap = this::askPassword;
+        // долгое нажатие — ввод пароля (для другого человека, если палец не читается
+        // или если узнавать некому: на A04 у системы нет ни лица, ни отпечатка)
+        lock.onLongPress = this::askPassword;
         // динамический остров: сканирование пальца (если нет окна службы — свой, здесь)
         island = new Island(this);
         root.addView(island, new FrameLayout.LayoutParams(-1, Ui.dp(130), Gravity.TOP));
@@ -97,13 +103,13 @@ public final class LockActivity extends Activity {
         pad.listener = new PinPad.Listener() {
             @Override
             public void accepted(String pin) {
-                pad.close();
+                closePad();
                 passed(pin);
             }
 
             @Override
             public void cancelled() {
-                pad.close();
+                closePad();
                 ui.postDelayed(LockActivity.this::listen, 250);
             }
         };
@@ -142,6 +148,7 @@ public final class LockActivity extends Activity {
                 authing = false;
                 grabbed = 0;
                 handTried = false;
+                faceTried = false;
                 FingerSensor.cancel();
                 listenNow();
             }
@@ -177,6 +184,7 @@ public final class LockActivity extends Activity {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        fg = true;
         if (!locked) {
             finish();
             return;
@@ -196,10 +204,12 @@ public final class LockActivity extends Activity {
     protected void onPause() {
         super.onPause();
         resumed = false;
+        fg = false;
         ui.removeCallbacks(tick);
         wall.setPaused(true);
         if (!leaving) {
             FingerSensor.cancel();
+            faceStop();
             authing = false;
             scan(-1);
         }
@@ -258,6 +268,8 @@ public final class LockActivity extends Activity {
         ui.removeCallbacks(handBack);
         handed = false;
         handTried = false;
+        faceTried = false;
+        faceStop();
         VanksAccess.uncover(true);
         FingerSensor.cancel();
         authing = false;
@@ -265,6 +277,7 @@ public final class LockActivity extends Activity {
         root.setBackgroundColor(0xFF000000);
         misses = 0;
         pad.setVisibility(View.GONE);
+        if (Build.VERSION.SDK_INT >= 31) wall.setRenderEffect(null);
         lock.error = false;
         lock.msg = idle();
         lock.animate().cancel();
@@ -294,18 +307,41 @@ public final class LockActivity extends Activity {
     /** Подсказка, пока ждём: палец, лицо или свайп — смотря что есть у телефона. */
     private String idle() {
         if (lock.sensor) return "Приложите палец к датчику";
-        return Bio.face(this) ? "Посмотрите на экран" : "Проведите вверх, чтобы войти";
+        if (Bio.face(this) || (needsPassword() && FaceUnlock.ready(this))) return "Посмотрите на экран";
+        return needsPassword() ? HOLD : "Проведите вверх, чтобы войти";
+    }
+
+    private static final String HOLD = "Зажмите экран, чтобы ввести пароль";
+
+    /** Узнать человека некому (нет ни лица, ни отпечатка), а войти можно только паролем. */
+    private boolean needsPassword() {
+        return !Bio.enrolled(this) && (systemLocked() || Secret.has(this));
     }
 
     /** Подсказка после отмены или ошибки. */
     private String tapHint() {
         if (lock.sensor) return "Коснитесь, чтобы войти по отпечатку";
-        return Bio.face(this) ? "Коснитесь, чтобы войти по лицу" : "Проведите вверх, чтобы войти";
+        if (Bio.face(this)) return "Коснитесь, чтобы войти по лицу";
+        return needsPassword() ? HOLD : "Проведите вверх, чтобы войти";
     }
 
     /** Начать слушать палец (без системного окна). */
     private void listen() {
         if (!locked || leaving || authing || !resumed || pad.getVisibility() == View.VISIBLE) return;
+        if (needsPassword()) {
+            // у Android ни лица, ни отпечатка: лицо узнаёт сам Vanks (если записано),
+            // системный ввод не зовём — пароль только по долгому нажатию
+            if (FaceUnlock.ready(this) && !faceTried && fg) {
+                faceScan();
+                return;
+            }
+            if (faceStop != null) return;
+            scan(-1);
+            lock.error = false;
+            lock.msg = HOLD;
+            lock.invalidate();
+            return;
+        }
         if (handOver()) return;
         // палец читаем сами и при запертом системном экране; если его откроет
         // сама система — тоже уходим (USER_PRESENT)
@@ -349,7 +385,7 @@ public final class LockActivity extends Activity {
      */
     private boolean handOver() {
         if (handed) return true;
-        if (handTried || !Prefs.lockSystemBio || km == null || !VanksAccess.running() || !systemLocked()) return false;
+        if (handTried || !Prefs.lockSystemBio || !Bio.enrolled(this) || km == null || !VanksAccess.running() || !systemLocked()) return false;
         handed = true;
         handTried = true;
         authGen++;
@@ -402,12 +438,7 @@ public final class LockActivity extends Activity {
         if (!handed) return;
         handed = false;
         if (leaving || !locked) return;
-        try {
-            startActivity(new Intent(this, LockActivity.class).putExtra("back", true)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION
-                            | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
-        } catch (RuntimeException ignored) {
-        }
+        bringBack();
         ui.postDelayed(() -> VanksAccess.uncover(false), 300);
         scan(-1);
         lock.msg = idle();
@@ -477,7 +508,7 @@ public final class LockActivity extends Activity {
                 if (gen != authGen) return;
                 lock.fingerUp();
                 lock.error = true;
-                lock.msg = ++misses >= 3 ? "Не получается — коснитесь дважды для пароля" : msg;
+                lock.msg = ++misses >= 3 ? "Не получается — зажмите экран для пароля" : msg;
                 lock.invalidate();
                 scan(Island.SCAN_MISS);
                 ui.postDelayed(() -> {
@@ -506,9 +537,63 @@ public final class LockActivity extends Activity {
         });
     }
 
+    /** Узнать лицо своей камерой (FaceUnlock): 5 секунд, в острове — «Лицо». */
+    private void faceScan() {
+        faceTried = true;
+        faceStop();
+        lock.error = false;
+        lock.msg = "Посмотрите на экран";
+        lock.invalidate();
+        scan(Island.SCANNING);
+        faceStop = FaceUnlock.scan(this, 5000, new FaceUnlock.Result() {
+            @Override
+            public void ok() {
+                faceStop = null;
+                if (leaving || !locked) return;
+                scan(Island.SCAN_OK);
+                passed(null);
+            }
+
+            @Override
+            public void fail(String msg) {
+                faceStop = null;
+                if (leaving || !locked) return;
+                scan(Island.SCAN_MISS);
+                ui.postDelayed(() -> {
+                    if (faceStop == null) scan(-1);
+                }, 1200);
+                lock.error = true;
+                lock.msg = msg + " — коснитесь ещё раз или зажмите для пароля";
+                lock.invalidate();
+            }
+        });
+    }
+
+    private void faceStop() {
+        if (faceStop != null) faceStop.run();
+        faceStop = null;
+    }
+
     /** Касание или свайп вверх. */
     private void tapped() {
         if (leaving) return;
+        if (needsPassword() && FaceUnlock.ready(this)) {
+            // касание — поискать лицо ещё раз
+            if (faceStop == null) faceScan();
+            return;
+        }
+        if (needsPassword()) {
+            // касание и свайп пароль не открывают — подсказать, что зажать
+            lock.error = true;
+            lock.msg = HOLD;
+            lock.invalidate();
+            Feel.buzz(lock, Feel.THUD);
+            ui.postDelayed(() -> {
+                lock.error = false;
+                lock.invalidate();
+            }, 900);
+            return;
+        }
         // касание датчика — читаем палец здесь, системный экран не зовём
         if (FingerSensor.silent(this)) {
             if (!authing) auth();
@@ -531,9 +616,14 @@ public final class LockActivity extends Activity {
      * приложение не может — система спросит сама (обычно тот же палец).
      */
     private void confirm() {
+        confirm(null);
+    }
+
+    /** typed — PIN, набранный на своей панели: его и набрать на системном экране. */
+    private void confirm(String typed) {
         lock.error = false;
-        // PIN указан в «Отпечаток и вход» и служба включена — она наберёт его сама
-        String p = Secret.get(this);
+        // PIN набран или указан в «Отпечаток и вход», служба включена — она наберёт его сама
+        String p = typed != null ? typed : Secret.get(this);
         boolean auto = p != null && VanksAccess.running();
         lock.msg = auto ? "Открываю…" : "Android просит подтвердить ещё раз";
         lock.invalidate();
@@ -559,23 +649,57 @@ public final class LockActivity extends Activity {
         if (auto) ui.postDelayed(() -> snap(b -> {
             VanksAccess.cover(b, 5000);
             ui.postDelayed(ask, 80);
+            // PIN не подошёл (набран на своей панели, без проверки) — свой экран
+            // снова сверху с панелью, системный ввод так и не показываем
+            if (typed != null && !Secret.has(this)) ui.postDelayed(() -> {
+                if (leaving || !locked || !systemLocked()) return;
+                bringBack();
+                VanksAccess.uncover(false);
+                openPad("Неверный пароль");
+            }, 2500);
         }), 50);
         else ask.run();
     }
 
+    /** Свой экран снова над системным. */
+    private void bringBack() {
+        try {
+            startActivity(new Intent(this, LockActivity.class).putExtra("back", true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION
+                            | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    /** Панель пароля: обои размываются, часы и подсказка уходят (как в ColorOS). */
+    private void openPad(String note) {
+        // PIN не сохранён — проверить его может только система: панель отдаёт любой от 4 цифр
+        pad.open(note, !Secret.has(this));
+        lock.animate().alpha(0).setDuration(200).start();
+        if (Build.VERSION.SDK_INT >= 31) wall.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(
+                Ui.dpf(28), Ui.dpf(28), android.graphics.Shader.TileMode.CLAMP));
+    }
+
+    private void closePad() {
+        pad.close();
+        lock.animate().alpha(1).setDuration(220).start();
+        if (Build.VERSION.SDK_INT >= 31) wall.setRenderEffect(null);
+    }
+
     /** Палец, лицо или пароль приняты: открыть (и системный замок, если он заперт). */
     private void passed(String typedPin) {
-        if (systemLocked()) confirm();
+        if (systemLocked()) confirm(typedPin);
         else leave();
     }
 
-    /** Двойное касание: свой ввод пароля, если PIN указан; иначе — окно Android. */
+    /** Долгое нажатие: свой ввод пароля, если PIN указан или телефон заперт паролем; иначе — окно Android. */
     private void askPassword() {
-        if (leaving) return;
+        if (leaving || pad.getVisibility() == View.VISIBLE) return;
         FingerSensor.cancel();
+        faceStop();
         authing = false;
         scan(-1);
-        if (Secret.has(this)) pad.open();
+        if (Secret.has(this) || (systemLocked() && VanksAccess.running())) openPad(null);
         else if (systemLocked()) confirm();
         else if (Bio.available(this)) Bio.auth(this, "Вход в Vanks", null, () -> passed(null), err -> {
             if (err != null) {
@@ -593,6 +717,7 @@ public final class LockActivity extends Activity {
         leaving = true;
         locked = false;
         handed = false;
+        faceStop();
         AodActivity.dismiss();
         ui.removeCallbacks(handBack);
         // занавес над системным экраном — прочь: дальше видно наш уход
@@ -615,7 +740,7 @@ public final class LockActivity extends Activity {
         // системный экран без PIN-кода — убрать сразу, чтобы под тающими обоями был стол, а не он
         if (km != null && km.isKeyguardLocked() && !km.isDeviceSecure()) km.requestDismissKeyguard(this, null);
         root.setBackground(null);
-        if (pad.getVisibility() == View.VISIBLE) pad.close();
+        if (pad.getVisibility() == View.VISIBLE) closePad();
         lock.playExit(() -> {});
         // волне нужны свои обои под ней — без волны их можно спрятать
         if (!Prefs.unlockWave && Home.wallUnder(wall.spec())) {

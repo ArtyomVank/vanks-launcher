@@ -390,6 +390,16 @@ final class Glyph {
             for (int j = 0; j <= 1; j++) c.drawCircle(cx + i * s * 0.12f, cy + s * 0.04f + j * s * 0.14f, s * 0.035f, q);
     }
 
+    /** «В окно»: окно поверх экрана — большая рамка и маленькое окно с полоской заголовка. */
+    static void window(Canvas c, float cx, float cy, float s, int color) {
+        Paint q = stroke(color, s);
+        r.set(cx - s * 0.34f, cy - s * 0.28f, cx + s * 0.34f, cy + s * 0.28f);
+        c.drawRoundRect(r, s * 0.08f, s * 0.08f, q);
+        q.setStyle(Paint.Style.FILL);
+        r.set(cx - s * 0.06f, cy - s * 0.12f, cx + s * 0.24f, cy + s * 0.16f);
+        c.drawRoundRect(r, s * 0.05f, s * 0.05f, q);
+    }
+
     static void alarm(Canvas c, float cx, float cy, float s, int color) {
         Paint q = stroke(color, s);
         c.drawCircle(cx, cy + s * 0.04f, s * 0.28f, q);

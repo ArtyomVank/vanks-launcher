@@ -1,0 +1,57 @@
+// Сделано tools/agsl.py из delta/shell/wallpaper/super/acrylic.frag — правьте там.
+// Живые обои «Акрил»: мягкие пятна света и световые ленты под стекло панелей.
+// Рисунок запечён (tools/gen-acrylic-walls.sh): photo — фон с пятнами, mask —
+// ленты на чёрном. Здесь только оживление, лёгкое для любой видеокарты:
+//   пятна медленно перетекают (фон читается со сдвигом, плавным, как течение),
+//   ленты колышутся волной и дышат светом, а при входе поднимаются снизу и
+//   разгораются — на экране блокировки они приглушены, фон темнее.
+// intro, zoom, time — как у остальных живых обоев. После правки:
+// tools/delta-shaders.sh.
+
+uniform vec2 res;
+uniform float intro;
+uniform float zoom;
+uniform float time;
+uniform shader photo;
+uniform vec2 photoSize;
+uniform shader mask;
+uniform vec2 maskSize;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float ease(float t) {
+    t = clamp(t, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+half4 main(vec2 fragCoord) {
+    vec2 qt_TexCoord0 = fragCoord / res;
+    // картинка 16:9 — заполнить экран любой формы, лишнее обрезать
+    float ar = res.x / res.y, ia = 16.0 / 9.0;
+    vec2 uv = qt_TexCoord0;
+    if (ar > ia) uv.y = 0.5 + (uv.y - 0.5) * ia / ar;
+    else uv.x = 0.5 + (uv.x - 0.5) * ar / ia;
+    float t = ease(intro);
+    uv = 0.5 + (uv - 0.5) * mix(1.0, 0.95, zoom) * mix(1.04, 1.0, t);
+
+    // время сцены: и в анимации на столе, и пока идёт вход
+    float k = time + intro * 6.0;
+
+    // пятна: плавное течение — сдвиг меняется медленно и по всей картинке
+    vec2 flow = vec2(sin(uv.y * 2.6 + k * 0.11) + 0.6 * sin(uv.x * 1.7 - k * 0.07),
+                     cos(uv.x * 2.2 + k * 0.09) + 0.6 * cos(uv.y * 1.5 + k * 0.05)) * 0.022;
+    vec3 base = photo.eval(clamp(clamp(uv + flow, 0.002, 0.998), 0.0, 1.0) * photoSize).rgb;
+
+    // ленты: волна поперёк, разной фазы вдоль экрана; при входе всплывают снизу
+    float wave = 0.022 * sin(uv.x * 4.2 + k * 0.33) + 0.012 * sin(uv.x * 9.0 - k * 0.21);
+    vec2 ru = uv + vec2(0.0, wave - 0.07 * (1.0 - t));
+    vec3 rib = mask.eval(clamp(clamp(ru, 0.002, 0.998), 0.0, 1.0) * maskSize).rgb;
+    float breathe = 0.86 + 0.14 * sin(k * 0.45 + uv.x * 2.0);
+    rib *= breathe * mix(0.35, 1.0, t);
+
+    // на экране блокировки фон глубже, при входе светлеет
+    base *= mix(0.72, 1.0, t);
+    vec3 col = 1.0 - (1.0 - base) * (1.0 - rib);
+
+    // зерно против ступенек на плавных переходах
+    col += (hash(qt_TexCoord0 * res) - 0.5) / 255.0 * 2.0;
+    return half4(vec4(col, 1.0));
+}

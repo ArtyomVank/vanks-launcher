@@ -35,6 +35,16 @@ final class Bio {
         return c.getPackageManager().hasSystemFeature(PackageManager.FEATURE_FINGERPRINT);
     }
 
+    /**
+     * Система умеет узнать человека сама: записан отпечаток или лицо. На Vanks OS
+     * для Galaxy A04 служб лица и отпечатка нет — там вход только паролем.
+     */
+    static boolean enrolled(Context c) {
+        if (Build.VERSION.SDK_INT < 30) return hasFingerprintSensor(c);
+        BiometricManager bm = c.getSystemService(BiometricManager.class);
+        return bm != null && bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS;
+    }
+
     /** Лицо (или другая биометрия без датчика отпечатка) записано и работает. */
     static boolean face(Context c) {
         if (Build.VERSION.SDK_INT < 30 || hasFingerprintSensor(c)) return false;

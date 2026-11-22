@@ -129,6 +129,10 @@ final class Tiles {
                 return start(c, Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC));
             case "settings":
                 return start(c, new Intent(c, SettingsActivity.class));
+            case "float":
+                // последнее приложение — плавающим окном; шторку закрыть, чтобы его было видно
+                Windows.floatLast(c);
+                return true;
             case "torch":
                 if (cameras == null || torchId == null) {
                     toast(c, "Фонарика нет");

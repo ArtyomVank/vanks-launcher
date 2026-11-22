@@ -142,6 +142,15 @@ final class WallView extends View {
             texture(c, s, "photo", R.drawable.wall_summit_photo, Shader.TileMode.CLAMP);
             texture(c, s, "mask", R.drawable.wall_summit_mask, Shader.TileMode.CLAMP);
         }
+        if (w.frag.equals("acrylic")) {
+            // у каждого «Акрила» свой запечённый рисунок: wall_acrylic_<цвет>_base / _rib
+            String n = "wall_" + w.id.replace('-', '_');
+            int base = c.getResources().getIdentifier(n + "_base", "drawable", c.getPackageName());
+            int rib = c.getResources().getIdentifier(n + "_rib", "drawable", c.getPackageName());
+            if (base == 0 || rib == 0) return null;
+            texture(c, s, "photo", base, Shader.TileMode.CLAMP);
+            texture(c, s, "mask", rib, Shader.TileMode.CLAMP);
+        }
         if (w.frag.equals("peak")) {
             texture(c, s, "photo", R.drawable.wall_peak_photo, Shader.TileMode.CLAMP);
             texture(c, s, "mask", R.drawable.wall_peak_mask, Shader.TileMode.CLAMP);

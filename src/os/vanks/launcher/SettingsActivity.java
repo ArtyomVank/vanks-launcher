@@ -1151,6 +1151,13 @@ public final class SettingsActivity extends Activity {
         info.run();
         addMineRow(col, null);
 
+        // готовые виды: обои и часы вместе, как «Пресеты» в Delta
+        Group lk = group(col, "Готовые виды", "Обои на оба экрана и часы экрана блокировки — одним нажатием, как в Delta на компьютере.");
+        add(lk, looksRow(() -> {
+            stack.invalidate();
+            info.run();
+        }));
+
         // часы
         Group cl = group(col, "Часы", "Все виды часов Delta с компьютера. Нажмите на вид — стопка сверху сразу покажет, как это будет.");
         add(cl, clockStrip(stack::invalidate));
@@ -1212,6 +1219,69 @@ public final class SettingsActivity extends Activity {
     }
 
     /** Куда поставить обои: на главный, на экран блокировки или на оба. */
+    /** Плитки готовых видов (Looks) и «Вернуть как было». */
+    private View looksRow(Runnable changed) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout row = new LinearLayout(this);
+        row.setPadding(Ui.dp(12), Ui.dp(10), Ui.dp(12), Ui.dp(8));
+        TextView undo = Views.label(this, "Вернуть как было", 15, Ui.medium, Ui.accentLight());
+        undo.setPadding(Ui.dp(16), Ui.dp(6), Ui.dp(16), Ui.dp(12));
+        ArrayList<View> tiles = new ArrayList<>();
+        Runnable mark = () -> {
+            String cur = Looks.current(this);
+            for (int i = 0; i < tiles.size(); i++)
+                tiles.get(i).setBackground(Views.round(Looks.LIST[i].id.equals(cur) ? Ui.accent() : 0x00000000, 16));
+            undo.setVisibility(Looks.canUndo(this) ? View.VISIBLE : View.GONE);
+        };
+        for (Looks.Look l : Looks.LIST) {
+            Walls.W w = Walls.find(l.wall);
+            if (w == null) continue;
+            LinearLayout t = new LinearLayout(this);
+            t.setOrientation(LinearLayout.VERTICAL);
+            t.setPadding(Ui.dp(3), Ui.dp(3), Ui.dp(3), Ui.dp(6));
+            android.widget.ImageView im = new android.widget.ImageView(this);
+            android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+            o.inSampleSize = 4;
+            im.setImageBitmap(android.graphics.BitmapFactory.decodeResource(getResources(), w.still, o));
+            im.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+            im.setBackground(Views.round(0xFF000000, 13));
+            im.setClipToOutline(true);
+            t.addView(im, new LinearLayout.LayoutParams(Ui.dp(92), Ui.dp(176)));
+            TextView name = Views.label(this, l.title, 14, Ui.medium, 0xFFFFFFFF);
+            name.setPadding(Ui.dp(4), Ui.dp(6), Ui.dp(4), 0);
+            t.addView(name);
+            TextView note = Views.label(this, l.note, 11, Ui.regular, SUB);
+            note.setPadding(Ui.dp(4), Ui.dp(1), Ui.dp(4), 0);
+            note.setMaxLines(2);
+            t.addView(note, new LinearLayout.LayoutParams(Ui.dp(92), -2));
+            t.setOnClickListener(v -> {
+                Feel.buzz(v, Feel.CLICK);
+                Looks.apply(this, l);
+                mark.run();
+                changed.run();
+                toast("Вид «" + l.title + "» поставлен");
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.rightMargin = Ui.dp(8);
+            row.addView(t, lp);
+            tiles.add(t);
+        }
+        undo.setOnClickListener(v -> {
+            Looks.undo(this);
+            mark.run();
+            changed.run();
+            toast("Вернули прежние обои и часы");
+        });
+        android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(this);
+        hs.setHorizontalScrollBarEnabled(false);
+        hs.addView(row);
+        box.addView(hs);
+        box.addView(undo);
+        mark.run();
+        return box;
+    }
+
     private void applyWall(Walls.W w, Runnable done) {
         String[] items = {"На главный экран", "На экран блокировки", "На оба экрана"};
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
@@ -2689,7 +2759,7 @@ public final class SettingsActivity extends Activity {
             case "dnd": return INDIGO;
             case "battery": return GREEN;
             case "media": return PINK;
-            case "camera": case "calc": case "settings": return GREY;
+            case "camera": case "calc": case "settings": case "float": return GREY;
         }
         return 0xFF48484A;
     }
@@ -2707,6 +2777,7 @@ public final class SettingsActivity extends Activity {
             case "volume": return Glyph::speaker;
             case "camera": return Glyph::camera;
             case "calc": return Glyph::calc;
+            case "float": return Glyph::window;
             case "alarm": case "timer": return Glyph::alarm;
             case "battery": return (c, x, y, s, cl) -> Glyph.battery(c, x, y, s, cl, 0.8f);
         }
@@ -3136,7 +3207,7 @@ public final class SettingsActivity extends Activity {
 
         // пароль: для других людей и чтобы система не спрашивала второй раз
         boolean hasPin = Secret.has(this), svc = VanksAccess.running();
-        Group pw = group(col, "Пароль", "Укажите тот же PIN-код, что стоит в Android. Тогда другой человек войдёт паролем прямо на экране Vanks (двойное касание экрана), "
+        Group pw = group(col, "Пароль", "Укажите тот же PIN-код, что стоит в Android. Тогда другой человек войдёт паролем прямо на экране Vanks (зажмите экран), "
                 + "а после вашего пальца служба «Vanks: жесты и вход» сама наберёт этот PIN на системном экране — второй раз он не спросит. "
                 + "PIN хранится на этом телефоне, зашифрованный ключом Android.");
         pinRow = row(INDIGO, (c, x, y, sz, cl) -> Glyph.lock(c, x, y, sz, cl, false), "PIN-код Android", null, hasPin ? "Задан" : "Нет", this::askPin);
@@ -3150,6 +3221,23 @@ public final class SettingsActivity extends Activity {
                 svc ? "Вкл." : "Выкл.", () -> {
                     if (VanksAccess.turnOn(this)) toast("Служба «Vanks: жесты и вход» включена");
                 }));
+
+        // своё лицо: у Android входа по лицу нет (Vanks OS на A04) — узнаёт Vanks камерой
+        boolean fe = FaceUnlock.enrolled(this);
+        Group mf = group(col, "Лицо Vanks", "Лицо узнаёт сам Vanks передней камерой, когда включается экран, а Android открывает "
+                + "сохранённым PIN-кодом. Защита слабая: датчика глубины нет, и телефон может открыться по фото или для похожего человека. "
+                + "Снимки не хранятся — только числа, по которым сравнивается лицо.");
+        add(mf, row(TEAL, Glyph::camera, fe ? "Записать лицо заново" : "Записать лицо", Secret.has(this) ? null : "Сначала задайте PIN-код выше",
+                fe ? "Записано" : null, () -> startActivity(new Intent(this, FaceActivity.class))));
+        if (fe) {
+            add(mf, toggleRow(GREEN, Glyph::camera, "Вход по лицу", "Экран блокировки ищет лицо 5 секунд", FaceUnlock.on(this), v -> FaceUnlock.setOn(this, v)));
+            add(mf, row(INDIGO, Glyph::info, "Проверить лицо", "Покажет, узнаёт ли и насколько похоже", null,
+                    () -> startActivity(new Intent(this, FaceActivity.class).putExtra("test", true))));
+            add(mf, row(RED, Glyph::camera, "Удалить лицо", null, null, () -> {
+                FaceUnlock.clear(this);
+                toast("Лицо удалено");
+            }));
+        }
 
         // лицо: Xiaomi отдаёт его только своему экрану блокировки
         Group fc = group(col, "Лицо", "HyperOS не даёт приложениям распознавание лица — только своему экрану блокировки. "

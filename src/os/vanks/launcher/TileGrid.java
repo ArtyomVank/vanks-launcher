@@ -38,7 +38,7 @@ final class TileGrid extends View {
     }
 
     static final String[] TYPES = {"wifi", "bt", "media", "torch", "dnd", "airplane", "rotate", "bright", "volume",
-            "camera", "calc", "alarm", "timer", "battery", "settings", "vpn", "location", "saver", "hotspot"};
+            "camera", "calc", "alarm", "timer", "battery", "settings", "vpn", "location", "saver", "hotspot", "float"};
 
     static String title(String t) {
         switch (t) {
@@ -61,6 +61,7 @@ final class TileGrid extends View {
             case "location": return "Геолокация";
             case "saver": return "Экономия заряда";
             case "hotspot": return "Точка доступа";
+            case "float": return "В окно";
         }
         if (QsTiles.is(t)) {
             QsTiles.Entry e = QsTiles.get(t);
@@ -454,6 +455,7 @@ final class TileGrid extends View {
             case "location": Glyph.pin(c, cx, cy, s, col); break;
             case "saver": Glyph.battery(c, cx, cy, s, col, 0.35f); break;
             case "hotspot": Glyph.hotspot(c, cx, cy, s, col); break;
+            case "float": Glyph.window(c, cx, cy, s, col); break;
             default:
                 if (QsTiles.is(type)) {
                     // значок плитки приложения — одноцветный, красим как свои
@@ -474,6 +476,7 @@ final class TileGrid extends View {
             case "torch": case "dnd": case "airplane": case "vpn": case "location": case "saver": return on ? "Вкл." : "Выкл.";
             case "rotate": return on ? "Вкл." : "Заблокирован";
             case "timer": return "Запустить";
+            case "float": return "Текущее";
             case "alarm": {
                 String a = ClockView.nextAlarm(getContext());
                 return a == null ? "Нет" : a;

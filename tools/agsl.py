@@ -11,7 +11,7 @@ import os
 import re
 import sys
 
-NAMES = ["blackhole", "moon", "earth", "prism", "circles", "you", "glass", "waves", "mountains", "dots", "peak"]
+NAMES = ["blackhole", "moon", "earth", "prism", "circles", "you", "glass", "waves", "mountains", "dots", "peak", "acrylic"]
 
 
 def convert(src):

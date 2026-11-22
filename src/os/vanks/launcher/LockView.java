@@ -21,10 +21,16 @@ final class LockView extends View {
     interface Listener { void unlockRequested(); }
 
     Listener listener;
-    /** Двойное касание экрана блокировки. */
-    Runnable onDoubleTap;
-    private long lastTapAt;
-    private float lastTapX, lastTapY, downX;
+    /** Долгое нажатие на экран блокировки — ввод пароля. */
+    Runnable onLongPress;
+    private float downX;
+    private boolean longFired;
+    private final Runnable longPress = () -> {
+        longFired = true;
+        setTranslationY(0);
+        Feel.buzz(this, Feel.PRESS);
+        if (onLongPress != null) onLongPress.run();
+    };
     String msg = "Коснитесь, чтобы войти по отпечатку";
     boolean error;
     /** Есть датчик отпечатка: без него значка нет, подпись — внизу экрана. */
@@ -274,33 +280,27 @@ final class LockView extends View {
             case MotionEvent.ACTION_DOWN: {
                 downY = e.getY();
                 downX = e.getX();
+                longFired = false;
+                removeCallbacks(longPress);
+                if (onLongPress != null) postDelayed(longPress, android.view.ViewConfiguration.getLongPressTimeout());
                 // коснулись значка отпечатка — он откликается
                 float[] f = finger();
                 if (sensor && Math.hypot(e.getX() - f[0], e.getY() - f[1]) < Ui.dpf(48)) fingerDown();
                 return true;
             }
             case MotionEvent.ACTION_MOVE:
+                if (longFired) return true;
+                if (Math.hypot(e.getX() - downX, e.getY() - downY) > Ui.dpf(16)) removeCallbacks(longPress);
                 setTranslationY(Math.min(0, (e.getY() - downY) * 0.35f));
                 return true;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 fingerUp();
+                removeCallbacks(longPress);
                 animate().translationY(0).setDuration(240).setInterpolator(Anim.EMPH).start();
-                if (e.getActionMasked() == MotionEvent.ACTION_UP) {
-                    long now = SystemClock.uptimeMillis();
-                    boolean tap = Math.hypot(e.getX() - downX, e.getY() - downY) < Ui.dpf(16);
-                    if (tap && onDoubleTap != null && now - lastTapAt < 320 && Math.hypot(e.getX() - lastTapX, e.getY() - lastTapY) < Ui.dpf(60)) {
-                        lastTapAt = 0;
-                        onDoubleTap.run();
-                    } else {
-                        if (tap) {
-                            lastTapAt = now;
-                            lastTapX = e.getX();
-                            lastTapY = e.getY();
-                        }
-                        if (listener != null) listener.unlockRequested();
-                    }
-                }
+                // долгое нажатие уже открыло ввод пароля — отпускание не считается касанием
+                if (e.getActionMasked() == MotionEvent.ACTION_UP && !longFired && listener != null) listener.unlockRequested();
+                longFired = false;
                 return true;
         }
         return true;

@@ -15,7 +15,7 @@ import java.util.HashSet;
 final class Prefs {
     static final int SHAPE_SQUIRCLE = 0, SHAPE_CIRCLE = 1, SHAPE_SQUARE = 2;
     static final String DEFAULT_TILES =
-            "wifi:2:1,bt:2:1,media:2:2,torch:1:1,dnd:1:1,bright:1:2,volume:1:2,airplane:1:1,rotate:1:1,camera:1:1,calc:1:1,alarm:1:1,battery:2:1";
+            "wifi:2:1,bt:2:1,media:2:2,torch:1:1,dnd:1:1,bright:1:2,volume:1:2,airplane:1:1,rotate:1:1,camera:1:1,calc:1:1,alarm:1:1,float:1:1,battery:2:1";
 
     static int accent = 0xFF7C5CFF;   // цвет (до 0.3 — номер в старом списке)
     static String ui = "acrylic";      // стиль: acrylic / delta
@@ -52,6 +52,8 @@ final class Prefs {
     static boolean island = true, islandVolume = true, islandRides = true, islandMedia = true;   // динамический остров и что в нём
     static boolean keepGestures = true; // жесты Android вместо кнопок (HyperOS ставит кнопки чужим лаунчерам)    // пункт управления справа сверху, уведомления — слева
     static boolean swipeHintSeen = false;
+    /** Плитку «В окно» уже добавляли в пункт управления (один раз: убрали — не возвращаем). */
+    static boolean floatTile;
     static String tiles = DEFAULT_TILES;
     static ArrayList<String> home = new ArrayList<>();
     static ArrayList<String> dock = new ArrayList<>();
@@ -143,6 +145,7 @@ final class Prefs {
         sysWallHome = sp.getString("sysWallHome", "");
         sysWallLock = sp.getString("sysWallLock", "");
         swipeHintSeen = sp.getBoolean("swipeHintSeen", false);
+        floatTile = sp.getBoolean("floatTile", false);
         tiles = sp.getString("tiles", DEFAULT_TILES);
         home = split(sp.getString("home", ""));
         dock = split(sp.getString("dock", ""));
@@ -220,6 +223,7 @@ final class Prefs {
                 .putBoolean("swipeSearch", swipeSearch)
                 .putInt("swipeV", 1)
                 .putBoolean("swipeHintSeen", swipeHintSeen)
+                .putBoolean("floatTile", floatTile)
                 .putString("tiles", tiles)
                 .putString("home", String.join("|", home))
                 .putString("dock", String.join("|", dock))

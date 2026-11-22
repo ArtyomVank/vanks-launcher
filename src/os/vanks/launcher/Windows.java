@@ -85,6 +85,53 @@ final class Windows {
         }
     }
 
+    /**
+     * «В окно» (плитка пункта управления): последнее открытое приложение —
+     * плавающим окном. С правами «Недавних» (Tasks.ok) окно меняет режим на
+     * месте; без них задача поднимается с параметрами окна, а если Android
+     * оставил её во весь экран — открывается заново тем же запуском.
+     */
+    static void floatLast(Context c) {
+        Tasks.Task t = Tasks.last(c);
+        if (t == null) {
+            Toast.makeText(c, "Сначала откройте приложение", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (t.mode == FREEFORM) return;
+        Rect r = floatPlace(c);
+        if (t.token != null && Tasks.floating(t, r)) return;
+        enable(c);
+        ActivityOptions o = ActivityOptions.makeBasic();
+        o.setLaunchBounds(r);
+        Bundle opts = mode(o, FREEFORM);
+        try {
+            c.getSystemService(android.app.ActivityManager.class).moveTaskToFront(t.id, 0, opts);
+        } catch (RuntimeException e) {
+            android.util.Log.w("Vanks", "в окно " + t.pkg + ": " + e);
+        }
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            if (Tasks.mode(c, t.id) == FREEFORM || t.intent == null) return;
+            Intent i = new Intent(t.intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ActivityOptions o2 = ActivityOptions.makeBasic();
+            o2.setLaunchBounds(r);
+            try {
+                c.startActivity(i, mode(o2, FREEFORM));
+            } catch (Exception e) {
+                Toast.makeText(c, "Не удалось открыть в окне", Toast.LENGTH_SHORT).show();
+            }
+        }, 350);
+    }
+
+    /** Место окна «В окно»: 86 % ширины и половина высоты, повыше центра (лёжа — две трети и 70 %). */
+    private static Rect floatPlace(Context c) {
+        DisplayMetrics m = c.getResources().getDisplayMetrics();
+        int w = m.widthPixels, h = m.heightPixels;
+        boolean land = w > h;
+        int ww = Math.round(w * (land ? 0.66f : 0.86f)), wh = Math.round(h * (land ? 0.7f : 0.5f));
+        int x = (w - ww) / 2, y = Math.round(h * (land ? 0.14f : 0.18f));
+        return new Rect(x, y, x + ww, y + wh);
+    }
+
     /** Окно — на весь экран (кнопка на рамке, если у окна Android своей нет). */
     static void fullscreen(Context c, String pkg) {
         Intent i = c.getPackageManager().getLaunchIntentForPackage(pkg);
